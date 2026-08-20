@@ -79,6 +79,37 @@ def test_flat_ingest_summaries_roster_fallback_and_incremental(tmp_path: Path) -
         assert full.runs_replaced == 1
 
 
+def test_flat_ingest_rejects_non_finite_cost_with_warning(tmp_path: Path) -> None:
+    run_dir = tmp_path / "case-neutral"
+    run_dir.mkdir()
+    (run_dir / "events.jsonl").write_text(
+        json.dumps({"text": "event", "cost": "nan"}) + "\n",
+        encoding="utf-8",
+    )
+    config = validate_mapping_config(
+        {
+            "retrace_mapping": 1,
+            "run_discovery": {
+                "pattern": "case-*",
+                "unit": "dir",
+                "events_file": "events.jsonl",
+            },
+            "run": {"id": "{dir_name}"},
+            "event": {"content": "text", "cost": "cost"},
+        }
+    )
+
+    with SqliteStore(tmp_path / "cache.db") as store:
+        ingest(config, tmp_path, store)
+        run = store.get_run("case-neutral")
+        events, total = store.get_events("case-neutral")
+
+    assert run is not None
+    assert run.ingest_warnings == 1
+    assert total == 1
+    assert events[0].cost is None
+
+
 def test_progress_and_config_hash_warning(tmp_path: Path) -> None:
     _tree(tmp_path)
     calls: list[tuple[str, int, int]] = []

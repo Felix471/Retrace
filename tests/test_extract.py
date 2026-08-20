@@ -9,6 +9,7 @@ import pytest
 
 from retrace.adapters.extract import EventFields, Extractor, FieldStats, RunFields
 from retrace.adapters.mapping_schema import MappingConfigError, validate_mapping_config
+from retrace.adapters.multisource import MultiSourceExtractor
 
 
 def _config(
@@ -186,6 +187,72 @@ def test_numeric_overflow_is_a_failure() -> None:
     assert result.cost is None
     assert extractor.stats.for_slot("cost") == FieldStats(failures=1)
     assert extractor.stats.total_warnings == 1
+
+
+@pytest.mark.parametrize(
+    "raw",
+    (float("nan"), float("inf"), "-inf", "Infinity"),
+    ids=("nan-float", "infinity-float", "negative-infinity-string", "infinity-string"),
+)
+def test_non_finite_cost_is_a_failure(raw: object) -> None:
+    extractor = _extractor(event={"cost": "value"})
+
+    result = extractor.extract_event_fields({"value": raw})
+
+    assert result is not None
+    assert result.cost is None
+    assert extractor.stats.for_slot("cost") == FieldStats(failures=1)
+    assert extractor.stats.total_warnings == 1
+
+
+def test_finite_cost_still_passes() -> None:
+    extractor = _extractor(event={"cost": "value"})
+
+    result = extractor.extract_event_fields({"value": "1.25"})
+
+    assert result is not None
+    assert result.cost == 1.25
+    assert extractor.stats.for_slot("cost") == FieldStats(hits=1)
+
+
+def test_non_finite_integer_is_a_failure() -> None:
+    extractor = _extractor(event={"tokens_in": "value"})
+
+    result = extractor.extract_event_fields({"value": float("inf")})
+
+    assert result is not None
+    assert result.tokens_in is None
+    assert extractor.stats.for_slot("tokens_in") == FieldStats(failures=1)
+
+
+@pytest.mark.parametrize("raw", (float("nan"), float("inf")), ids=("nan", "infinity"))
+def test_non_finite_timestamp_is_a_failure(raw: float) -> None:
+    extractor = _extractor(event={"timestamp": "value"})
+
+    result = extractor.extract_event_fields({"value": raw})
+
+    assert result is not None
+    assert result.timestamp is None
+    assert extractor.stats.for_slot("timestamp") == FieldStats(failures=1)
+
+
+def test_multisource_non_finite_cost_is_a_failure() -> None:
+    config = validate_mapping_config(
+        _config(
+            event={
+                "sources": [
+                    {"name": "neutral", "path": "items", "fields": {"cost": "amount"}}
+                ]
+            }
+        )
+    )
+    extractor = MultiSourceExtractor(config)
+
+    events = extractor.extract_events({"items": [{"amount": "Infinity"}]})
+
+    assert len(events) == 1
+    assert events[0].cost is None
+    assert extractor.stats.for_slot("event.sources.neutral.cost") == FieldStats(failures=1)
 
 
 @pytest.mark.parametrize(

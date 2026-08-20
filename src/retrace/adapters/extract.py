@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -152,7 +153,10 @@ def _coerce_integer(value: object) -> tuple[int | None, bool]:
         return value, False
     if isinstance(value, float):
         if value.is_integer():
-            return int(value), False
+            try:
+                return int(value), False
+            except (OverflowError, ValueError):
+                return None, True
         return None, True
     if isinstance(value, str):
         candidate = value.strip()
@@ -169,15 +173,17 @@ def _coerce_float(value: object) -> tuple[float | None, bool]:
         return None, True
     if isinstance(value, (int, float)):
         try:
-            return float(value), False
+            candidate = float(value)
         except OverflowError:
             return None, True
-    if isinstance(value, str):
+    elif isinstance(value, str):
         try:
-            return float(value.strip()), False
+            candidate = float(value.strip())
         except (OverflowError, ValueError):
-            pass
-    return None, True
+            return None, True
+    else:
+        return None, True
+    return (candidate, False) if math.isfinite(candidate) else (None, True)
 
 
 def _coerce_string(value: object) -> tuple[str | None, bool]:
