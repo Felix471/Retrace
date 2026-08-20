@@ -43,6 +43,26 @@ process.stdout.write(JSON.stringify(logic[request.function](...request.arguments
     return json.loads(completed.stdout)
 
 
+def _call_with_inputs(function: str, *arguments: object) -> dict[str, Any]:
+    script = """
+const logic = await import(process.argv[1]);
+const request = JSON.parse(await new Promise(resolve => {
+  let value = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", chunk => value += chunk);
+  process.stdin.on("end", () => resolve(value));
+}));
+const result = logic[request.function](...request.arguments);
+process.stdout.write(JSON.stringify({result, arguments: request.arguments}));
+"""
+    completed = subprocess.run(
+        [NODE or "node", "--experimental-default-type=module", "--input-type=module", "-e", script, LOGIC.as_uri()],
+        input=json.dumps({"function": function, "arguments": arguments}),
+        encoding="utf-8", capture_output=True, check=True,
+    )
+    return json.loads(completed.stdout)
+
+
 def test_group_by_turn_preserves_order_and_boundaries() -> None:
     events = [
         {"id": "a", "turn": 2},
@@ -173,3 +193,31 @@ def test_table_cell_formatter() -> None:
     assert _call("formatCell", 0.123456, "total_cost") == "0.1235"
     assert _call("formatCell", 7, "n_events") == "7"
     assert _call("formatCell", ["a", 2], "metadata") == '["a",2]'
+
+
+def test_resolve_anchors_handles_colons_loading_and_detached_passthrough() -> None:
+    tag = {
+        "event_ids": ["team:run:1", "team:run:8", "team:run:99"],
+        "detached_event_ids": ["team:run:99"],
+    }
+    assert _call("resolveAnchors", tag, [0, 1, 2], 10) == {
+        "anchored": ["team:run:1", "team:run:8"],
+        "detachedFromApi": ["team:run:99"],
+        "needsLoad": [8],
+    }
+
+
+def test_toggle_selection_add_remove_order_and_deduplicate() -> None:
+    assert _call("toggleSelection", ["a", "b"], "c") == ["a", "b", "c"]
+    assert _call("toggleSelection", ["a", "b"], "a") == ["b"]
+    assert _call("toggleSelection", ["a", "a"], "b") == ["a", "b"]
+
+
+def test_tag_list_helpers_are_immutable() -> None:
+    tags = [{"mode": "1.1"}, {"mode": "2.1"}]
+    added = _call_with_inputs("tagListWith", tags, {"mode": "3.1"})
+    assert added["result"] == [*tags, {"mode": "3.1"}]
+    assert added["arguments"] == [tags, {"mode": "3.1"}]
+    removed = _call_with_inputs("tagListWithout", tags, 0)
+    assert removed["result"] == [tags[1]]
+    assert removed["arguments"] == [tags, 0]

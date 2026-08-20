@@ -25,6 +25,45 @@ export function previewOf(content, maxLen = 120) {
   return `${flat.slice(0, Math.max(0, maxLen - 3))}...`;
 }
 
+function eventOrdinal(eventId) {
+  const value = String(eventId ?? "");
+  const separator = value.lastIndexOf(":");
+  if (separator === -1) return null;
+  const suffix = value.slice(separator + 1);
+  if (!/^\d+$/.test(suffix)) return null;
+  const ordinal = Number(suffix);
+  return Number.isSafeInteger(ordinal) ? ordinal : null;
+}
+
+export function resolveAnchors(tag, loadedOrdinals, totalEvents) {
+  const loaded = new Set(loadedOrdinals);
+  const detachedFromApi = [...(tag?.detached_event_ids || [])];
+  const detached = new Set(detachedFromApi);
+  const anchored = [];
+  const needsLoad = [];
+  for (const id of tag?.event_ids || []) {
+    if (detached.has(id)) continue;
+    const ordinal = eventOrdinal(id);
+    if (ordinal === null || ordinal < 0 || ordinal >= totalEvents) continue;
+    anchored.push(id);
+    if (!loaded.has(ordinal) && !needsLoad.includes(ordinal)) needsLoad.push(ordinal);
+  }
+  return { anchored, detachedFromApi, needsLoad };
+}
+
+export function toggleSelection(selectedIds, id) {
+  const unique = selectedIds.filter((value, index, values) => values.indexOf(value) === index);
+  return unique.includes(id) ? unique.filter(value => value !== id) : [...unique, id];
+}
+
+export function tagListWith(tags, newTag) {
+  return [...tags, newTag];
+}
+
+export function tagListWithout(tags, index) {
+  return tags.filter((_tag, tagIndex) => tagIndex !== index);
+}
+
 function decoded(value) {
   if (value === null || value === "") return null;
   try { return decodeURIComponent(value); } catch { return null; }

@@ -1,6 +1,6 @@
 import { Component, h, render } from "/ui/vendor/preact.module.js";
 import htm from "/ui/vendor/htm.module.js";
-import { cycleSort, formatCell, groupByTurn, groupValueOf, highlightSegments, laneFor, matchesSearch, outcomeBarSegments, parseHashState, parseTableHashState, previewOf, serializeHashState, serializeTableHashState, toggleColumn } from "/ui/logic.js";
+import { cycleSort, formatCell, groupByTurn, groupValueOf, highlightSegments, laneFor, matchesSearch, outcomeBarSegments, parseHashState, parseTableHashState, previewOf, resolveAnchors, serializeHashState, serializeTableHashState, tagListWith, tagListWithout, toggleColumn, toggleSelection } from "/ui/logic.js";
 
 const html = htm.bind(h);
 const PAGE_SIZE = 500;
@@ -16,6 +16,18 @@ async function json(url) {
   const response = await fetch(url);
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
   return response.json();
+}
+
+async function putJson(url, payload) {
+  const response = await fetch(url, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+  return response.json();
+}
+
+function ordinalOf(id) {
+  return Number.parseInt(String(id).slice(String(id).lastIndexOf(":") + 1), 10);
 }
 
 function Value({ value }) {
@@ -49,16 +61,18 @@ function Highlighted({ text, query }) {
 
 class EventRow extends Component {
   state = { open: false };
-  render({ event, agentIds, query }, { open }) {
+  render({ event, agentIds, query, selected, onSelect, markers }, { open }) {
   const lane = laneFor(event.agent_id, agentIds);
   const repaired = event.repaired.length > 0;
   const style = lane === null ? {} : { "--lane": lane, "--lanes": Math.max(agentIds.length, lane + 1) };
-  return html`<article class=${`event ${lane === null ? "neutral" : `color-${lane % 8}`}`} style=${style}>
+  return html`<article id=${`event-${event.ordinal}`} class=${`event ${lane === null ? "neutral" : `color-${lane % 8}`}`} style=${style}>
+    <label class="event-select" title="Select event for tag anchor"><input type="checkbox" checked=${selected} onChange=${() => onSelect(event.id)} /> select</label>
     <button class="event-summary" onClick=${() => this.setState({ open: !open })} aria-expanded=${open}>
       <span class="agent">${event.agent_id ?? "system"}</span>
       ${event.role && html`<span class="role">${event.role}</span>`}
       <span class=${`badge badge-${event.badge}`}>${event.type}</span>
       ${repaired && html`<span class="badge repaired">repaired</span>`}
+      ${markers.map(marker => html`<span class="tag-glyph" title=${`${marker.mode} ${marker.name}`}>tag</span>`)}
       <span class="preview"><${Highlighted} text=${previewOf(event.content, 120)} query=${query} /></span>
     </button>
     ${open && html`<div class="event-detail">
@@ -71,7 +85,7 @@ class EventRow extends Component {
 }
 
 class Replay extends Component {
-  state = { run: null, events: [], total: 0, busy: false, error: "" };
+  state = { run: null, events: [], total: 0, busy: false, error: "", tags: [], runNote: "", vocabulary: [], selectedIds: [], mode: "", note: "", anchor: true, tagBusy: false };
   request = 0;
   componentDidMount() { this.reset(this.props.runId); }
   componentDidUpdate(previous) {
@@ -81,9 +95,40 @@ class Replay extends Component {
     }
   }
   reset(runId) {
-    this.setState({ run: null, events: [], total: 0, error: "" });
+    this.setState({ run: null, events: [], total: 0, error: "", tags: [], selectedIds: [], mode: "", note: "" });
     json(`/api/runs/${encodeURIComponent(runId)}`).then(run => this.setState({ run })).catch(reason => this.setState({ error: String(reason) }));
+    json("/api/tags/vocabulary").then(value => this.setState({ vocabulary: value.categories, mode: value.categories[0]?.modes[0]?.id || "" })).catch(reason => this.setState({ error: String(reason) }));
+    json(`/api/runs/${encodeURIComponent(runId)}/tags`).then(value => this.setState({ tags: value.tags, runNote: value.run_note })).catch(reason => this.setState({ error: String(reason) }));
     this.load(0, false, runId);
+  }
+  async replaceTags(tags) {
+    this.setState({ tagBusy: true });
+    try {
+      const value = await putJson(`/api/runs/${encodeURIComponent(this.props.runId)}/tags`, { tags, run_note: this.state.runNote });
+      this.setState({ tags: value.tags, runNote: value.run_note, tagBusy: false });
+      return true;
+    } catch (reason) {
+      this.setState({ error: String(reason), tagBusy: false });
+      return false;
+    }
+  }
+  async addTag(event) {
+    event.preventDefault();
+    const tag = { mode: this.state.mode, note: this.state.note, event_ids: this.state.anchor ? this.state.selectedIds : [] };
+    if (await this.replaceTags(tagListWith(this.state.tags, tag))) this.setState({ note: "", selectedIds: [] });
+  }
+  async jumpTo(eventId) {
+    const ordinal = ordinalOf(eventId);
+    if (!this.state.events.some(event => event.ordinal === ordinal) && this.state.events.length < this.state.total) {
+      await this.load(this.state.events.length, true);
+    }
+    requestAnimationFrame(() => {
+      const row = document.getElementById(`event-${ordinal}`);
+      if (!row) return;
+      row.scrollIntoView({ behavior: "smooth", block: "center" });
+      row.classList.add("anchor-highlight");
+      setTimeout(() => row.classList.remove("anchor-highlight"), 1400);
+    });
   }
   async load(offset, all = false, runId = this.props.runId) {
     const request = offset === 0 ? ++this.request : this.request;
@@ -110,7 +155,7 @@ class Replay extends Component {
       if (request === this.request) this.setState({ busy: false });
     }
   }
-  render({ agent, phase, type, q, onState, backHash }, { run, events, total, busy, error }) {
+  render({ agent, phase, type, q, onState, backHash }, { run, events, total, busy, error, tags, vocabulary, selectedIds, mode, note, anchor, tagBusy }) {
   if (error) return html`<p class="error">${error}</p>`;
   if (!run) return html`<p>Loading run...</p>`;
   return html`<section class="replay">
@@ -118,6 +163,31 @@ class Replay extends Component {
     <header><h2>${run.id}</h2><span>${run.outcome ?? "No outcome"}</span></header>
     ${run.ingest_warnings > 0 && html`<div class="banner warning">${run.ingest_warnings} ingest warnings in this run</div>`}
     ${run.n_repaired > 0 && html`<div class="banner repair">${run.n_repaired} records repaired in this run</div>`}
+    <details class="tag-panel" open><summary>Tags (${tags.length})</summary>
+      <div class="tag-list">${tags.length === 0 && html`<p>No tags.</p>`}${tags.map((tag, index) => {
+        const modeInfo = vocabulary.flatMap(category => category.modes).find(item => item.id === tag.mode);
+        const resolution = resolveAnchors(tag, events.map(item => item.ordinal), run.n_events);
+        const available = new Set(resolution.anchored);
+        return html`<details class="tag-item" key=${`${tag.created_at}-${index}`}><summary>
+          <b>${tag.mode} ${modeInfo?.name || ""}</b> <span>${tag.event_ids.length} anchors</span>
+          ${resolution.detachedFromApi.length > 0 && html`<span class="badge detached">${resolution.detachedFromApi.length} detached</span>`}
+        </summary><div class="tag-body">
+          ${tag.note && html`<p>${tag.note}</p>`}<small>Created ${tag.created_at}</small>
+          ${tag.event_ids.length > 0 && html`<ul>${tag.event_ids.map(id => html`<li>${available.has(id)
+            ? html`<button class="anchor-link" onClick=${() => this.jumpTo(id)}>${id}</button>`
+            : resolution.detachedFromApi.includes(id) ? html`<span>${id} (detached)</span>` : html`<button class="anchor-link" onClick=${() => this.jumpTo(id)}>${id}</button>`}</li>`)}</ul>`}
+          <button disabled=${tagBusy} onClick=${() => this.replaceTags(tagListWithout(tags, index))}>Delete tag</button>
+        </div></details>`;
+      })}</div>
+      <form class="tag-form" onSubmit=${event => this.addTag(event)}>
+        <label>Failure mode<select required value=${mode} onChange=${event => this.setState({ mode: event.target.value })}>
+          ${vocabulary.map(category => html`<optgroup label=${category.category}>${category.modes.map(item => html`<option value=${item.id} title=${item.description}>${item.id} ${item.name}</option>`)}</optgroup>`)}
+        </select></label>
+        <label>Note (optional)<textarea value=${note} onInput=${event => this.setState({ note: event.target.value })}></textarea></label>
+        <label class="anchor-toggle"><input type="checkbox" checked=${anchor} onChange=${event => this.setState({ anchor: event.target.checked })} /> Anchor to selected events (${selectedIds.length})</label>
+        <button disabled=${tagBusy || !mode}>Add tag</button>
+      </form>
+    </details>
     <div class="filters">
       <label>Agent<select value=${agent || ""} onChange=${event => onState({ agent: event.target.value || null })}>
         <option value="">All</option>${run.agents.map(value => html`<option value=${value}>${value}</option>`)}</select></label>
@@ -130,7 +200,7 @@ class Replay extends Component {
     ${(() => { const matching = events.filter(event => matchesSearch(event, q)); return html`
     <div class="timeline">${groupByTurn(matching).map(group => html`<section class="turn">
       <h3>Turn ${group.turn}</h3>
-      ${group.events.map(event => html`<${EventRow} key=${event.id} event=${event} agentIds=${run.agent_ids} query=${q} />`)}
+      ${group.events.map(event => html`<${EventRow} key=${event.id} event=${event} agentIds=${run.agent_ids} query=${q} selected=${selectedIds.includes(event.id)} onSelect=${id => this.setState({ selectedIds: toggleSelection(this.state.selectedIds, id) })} markers=${tags.filter(tag => tag.event_ids.includes(event.id)).map(tag => ({ mode: tag.mode, name: vocabulary.flatMap(category => category.modes).find(item => item.id === tag.mode)?.name || "" }))} />`)}
     </section>`)}</div>
     <footer class="paging"><span>${events.length} of ${total} loaded, ${matching.length} matching</span>
       ${events.length < total && html`<button disabled=${busy} onClick=${() => this.load(events.length)}>Load more</button>`}
