@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from importlib.resources import files
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
 from retrace.core.aggregate import aggregate_runs
+from retrace.core.align import COMPARATORS, align
 from retrace.core.mast import FAILURE_MODE_CATEGORIES, FAILURE_MODES
 from retrace.core.model import VALID_EVENT_TYPES, Event
 from retrace.core.store import SqliteStore
@@ -137,6 +138,47 @@ class EventsResponse(BaseModel):
     limit: int = Field(description="Applied page size, capped at 2000.")
 
 
+class CompareCountsResponse(BaseModel):
+    """Counts for each aligned-pair status."""
+
+    matches: int
+    content_diffs: int
+    only_a: int
+    only_b: int
+
+
+class FirstDivergenceResponse(BaseModel):
+    """The earliest divergence in the complete alignment."""
+
+    index: int
+    kind: Literal["structural", "content"]
+
+
+class AlignedPairResponse(BaseModel):
+    """One pair in a paginated alignment window."""
+
+    status: Literal["match", "content-diff", "only-a", "only-b"]
+    index_a: int | None
+    index_b: int | None
+    event_a: EventResponse | None
+    event_b: EventResponse | None
+
+
+class CompareResponse(BaseModel):
+    """A page from the full alignment of two runs."""
+
+    run_a: RunResponse
+    run_b: RunResponse
+    counts: CompareCountsResponse
+    first_structural_divergence: int | None
+    first_content_divergence: int | None
+    first_divergence: FirstDivergenceResponse | None
+    pairs: list[AlignedPairResponse]
+    total: int
+    offset: int
+    limit: int = Field(description="Applied page size, capped at 2000.")
+
+
 class FailureModeResponse(BaseModel):
     """One mode in the fixed MAST failure vocabulary."""
 
@@ -251,6 +293,18 @@ def _event_payload(event: Event) -> dict[str, Any]:
         **data,
         "badge": event_type if event_type in VALID_EVENT_TYPES else "other",
         "repaired": repaired,
+    }
+
+
+def _run_payload(store: SqliteStore, run_id: str) -> dict[str, Any]:
+    run = store.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return {
+        **run.to_dict(),
+        "agents": store.distinct_agents(run_id),
+        "phases": store.distinct_phases(run_id),
+        "types": store.distinct_types(run_id),
     }
 
 
@@ -427,14 +481,63 @@ def create_app(db_path: Path) -> FastAPI:
     @app.get("/api/runs/{run_id}", response_model=RunResponse)
     async def run_summary(request: Request, run_id: str) -> dict[str, Any]:
         store: SqliteStore = request.app.state.store
-        run = store.get_run(run_id)
-        if run is None:
-            raise HTTPException(status_code=404, detail="Run not found")
+        return _run_payload(store, run_id)
+
+    @app.get("/api/compare", response_model=CompareResponse)
+    async def compare_runs(
+        request: Request,
+        a: str,
+        b: str,
+        comparator: str = "normalized",
+        offset: Annotated[int, Query(ge=0)] = 0,
+        limit: Annotated[int, Query(ge=0)] = 500,
+    ) -> dict[str, Any]:
+        store: SqliteStore = request.app.state.store
+        run_a = _run_payload(store, a)
+        run_b = _run_payload(store, b)
+        if comparator not in COMPARATORS:
+            valid = ", ".join(sorted(COMPARATORS))
+            raise HTTPException(
+                status_code=422,
+                detail=f"unknown comparator {comparator!r}; valid names: {valid}",
+            )
+        events_a, _ = store.get_events(a, limit=2_147_483_647)
+        events_b, _ = store.get_events(b, limit=2_147_483_647)
+        result = align(events_a, events_b, comparator)
+        applied_limit = min(limit, 2000)
+        page = result.pairs[offset : offset + applied_limit]
         return {
-            **run.to_dict(),
-            "agents": store.distinct_agents(run_id),
-            "phases": store.distinct_phases(run_id),
-            "types": store.distinct_types(run_id),
+            "run_a": run_a,
+            "run_b": run_b,
+            "counts": {
+                "matches": result.summary.matches,
+                "content_diffs": result.summary.content_diffs,
+                "only_a": result.summary.only_a,
+                "only_b": result.summary.only_b,
+            },
+            "first_structural_divergence": result.first_structural_divergence,
+            "first_content_divergence": result.first_content_divergence,
+            "first_divergence": (
+                None
+                if result.first_divergence is None
+                else {
+                    "index": result.first_divergence.index,
+                    "kind": result.first_divergence.kind,
+                }
+            ),
+            "pairs": [
+                {
+                    "status": pair.status,
+                    "index_a": pair.index_a,
+                    "index_b": pair.index_b,
+                    "event_a": None if pair.index_a is None else _event_payload(events_a[pair.index_a]),
+                    "event_b": None if pair.index_b is None else _event_payload(events_b[pair.index_b]),
+                }
+                for pair in page
+            ],
+            "total": len(result.pairs),
+            "offset": offset,
+            "limit": applied_limit,
         }
 
     @app.get("/api/runs/{run_id}/tags", response_model=TagsResponse)
@@ -502,10 +605,14 @@ def create_app(db_path: Path) -> FastAPI:
 
 
 __all__ = [
+    "AlignedPairResponse",
+    "CompareCountsResponse",
+    "CompareResponse",
     "EventResponse",
     "EventsResponse",
     "FailureModeCategoryResponse",
     "FailureModeResponse",
+    "FirstDivergenceResponse",
     "RunGroupResponse",
     "RunListItem",
     "RunResponse",
