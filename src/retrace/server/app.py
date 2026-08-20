@@ -40,6 +40,18 @@ class RunResponse(BaseModel):
     types: list[str]
 
 
+class RunListItem(BaseModel):
+    """The compact run representation used by the replay picker."""
+
+    id: str
+    outcome: str | None
+    n_events: int
+    n_turns: int
+    ingest_warnings: int
+    n_repaired: int
+    duration_s: float | None
+
+
 class EventResponse(BaseModel):
     """One event in its stable run order."""
 
@@ -102,6 +114,22 @@ def create_app(db_path: Path) -> FastAPI:
             "metadata_keys": metadata_keys,
         }
 
+    @app.get("/api/runs", response_model=list[RunListItem])
+    async def runs(request: Request) -> list[RunListItem]:
+        store: SqliteStore = request.app.state.store
+        return [
+            RunListItem(
+                id=run.id,
+                outcome=run.outcome,
+                n_events=run.n_events,
+                n_turns=run.n_turns,
+                ingest_warnings=run.ingest_warnings,
+                n_repaired=run.n_repaired,
+                duration_s=run.duration_s,
+            )
+            for run in store.list_runs()
+        ]
+
     @app.get("/api/runs/{run_id}", response_model=RunResponse)
     async def run_summary(request: Request, run_id: str) -> dict[str, Any]:
         store: SqliteStore = request.app.state.store
@@ -152,4 +180,10 @@ def create_app(db_path: Path) -> FastAPI:
     return app
 
 
-__all__ = ["EventResponse", "EventsResponse", "RunResponse", "create_app"]
+__all__ = [
+    "EventResponse",
+    "EventsResponse",
+    "RunListItem",
+    "RunResponse",
+    "create_app",
+]

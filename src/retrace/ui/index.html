@@ -1,12 +1,38 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Retrace</title>
-  </head>
-  <body>
-    <main id="app">Loading...</main>
-    <script type="module" src="/ui/app.js"></script>
-  </body>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Retrace replay</title>
+  <style>
+    :root { font: 15px/1.45 system-ui, sans-serif; color: #18202b; background: #f4f6f8; }
+    * { box-sizing: border-box; } body { margin: 0; } button { font: inherit; }
+    .layout { min-height: 100vh; display: grid; grid-template-columns: 18rem 1fr; }
+    aside { background: #18202b; color: white; padding: 1rem; overflow: auto; }
+    aside h1 { margin: 0 0 1rem; } nav { display: grid; gap: .35rem; }
+    nav a { color: #dce4ee; text-decoration: none; padding: .65rem; border-radius: .4rem; display: grid; }
+    nav a:hover, nav a.selected { background: #344154; } nav span, nav small { opacity: .8; }
+    main { min-width: 0; padding: 1.5rem; } .replay > header { display: flex; align-items: baseline; gap: 1rem; }
+    h2 { overflow-wrap: anywhere; } .banner { padding: .75rem 1rem; margin: .6rem 0; border-radius: .35rem; }
+    .warning { background: #fff1c7; color: #684c00; } .repair { background: #dff4ea; color: #155d40; }
+    .turn { border-left: 2px solid #ccd3dd; padding: .2rem 0 1rem 1rem; } .turn h3 { margin: .35rem 0; }
+    .event { width: calc(100% / var(--lanes, 1)); margin-left: calc(var(--lane, 0) * 100% / var(--lanes, 1)); border-left: .35rem solid; background: white; box-shadow: 0 1px 3px #0002; margin-bottom: .45rem; }
+    .event.neutral { width: 100%; margin-left: 0; border-color: #84909e; }
+    .color-0 { border-color: #3973ac; } .color-1 { border-color: #b75c31; } .color-2 { border-color: #36855b; }
+    .color-3 { border-color: #8056a5; } .color-4 { border-color: #b33b67; } .color-5 { border-color: #2a858f; }
+    .color-6 { border-color: #867326; } .color-7 { border-color: #596b9d; }
+    .event-summary { width: 100%; border: 0; background: transparent; padding: .6rem; display: flex; align-items: center; gap: .45rem; cursor: pointer; text-align: left; }
+    .agent { font-weight: 700; } .role { color: #647184; } .preview { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; flex: 1; }
+    .badge { border-radius: 1rem; padding: .08rem .45rem; font-size: .75rem; color: white; background: #697583; }
+    .badge-message { background: #3973ac; } .badge-tool_call { background: #b75c31; } .badge-tool_result { background: #36855b; }
+    .badge-system { background: #8056a5; } .badge-other { background: #b33b67; } .repaired { background: #16704c; }
+    .event-detail { border-top: 1px solid #e1e5ea; padding: .5rem 1rem 1rem; } h4 { margin-bottom: .25rem; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: .2rem 0; font: .85rem/1.45 ui-monospace, monospace; }
+    table { border-collapse: collapse; width: 100%; } th, td { border: 1px solid #d8dee6; padding: .35rem; text-align: left; vertical-align: top; }
+    .paging { display: flex; gap: .6rem; align-items: center; padding: 1rem 0; } .error { color: #a21d2e; }
+    .empty { max-width: 32rem; margin: 15vh auto; text-align: center; color: #647184; }
+    @media (max-width: 700px) { .layout { grid-template-columns: 1fr; } aside { max-height: 15rem; } main { padding: .75rem; } .event { width: 100%; margin-left: 0; } }
+  </style>
+</head>
+<body><div id="app">Loading...</div><script type="module" src="/ui/app.js"></script></body>
 </html>
