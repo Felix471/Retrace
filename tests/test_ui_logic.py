@@ -107,3 +107,38 @@ def test_highlight_segments(text: str, query: str, expected_matches: list[str]) 
 
 def test_highlight_segments_empty_query() -> None:
     assert _call("highlightSegments", "Text", "") == [{"text": "Text", "match": False}]
+
+
+def test_table_hash_state_round_trip_and_defaults() -> None:
+    state = {
+        "sort": "total_cost", "order": "desc", "outcome": "done & checked",
+        "metadataKey": "group/name", "metadataValue": "A+B", "columns": ["group/name", "seed"],
+        "offset": 400,
+    }
+    encoded = _call("serializeTableHashState", state)
+    assert _call("parseTableHashState", encoded) == state
+    assert _call("parseTableHashState", "") == {
+        "sort": "id", "order": "asc", "outcome": None, "metadataKey": None,
+        "metadataValue": None, "columns": [], "offset": 0,
+    }
+
+
+def test_toggle_column_add_remove_order_and_no_duplicates() -> None:
+    assert _call("toggleColumn", ["first"], "second") == ["first", "second"]
+    assert _call("toggleColumn", ["first", "second"], "first") == ["second"]
+    assert _call("toggleColumn", ["first", "second"], "second") == ["first"]
+    assert _call("toggleColumn", ["first", "first"], "second") == ["first", "second"]
+
+
+def test_cycle_sort_direction_and_field_switch() -> None:
+    assert _call("cycleSort", {"sort": "id", "order": "asc"}, "id") == {"sort": "id", "order": "desc"}
+    assert _call("cycleSort", {"sort": "id", "order": "desc"}, "id") == {"sort": "id", "order": "asc"}
+    assert _call("cycleSort", {"sort": "id", "order": "desc"}, "n_turns") == {"sort": "n_turns", "order": "asc"}
+
+
+def test_table_cell_formatter() -> None:
+    assert _call("formatCell", None, "duration_s") == ""
+    assert _call("formatCell", 1.236, "duration_s") == "1.24"
+    assert _call("formatCell", 0.123456, "total_cost") == "0.1235"
+    assert _call("formatCell", 7, "n_events") == "7"
+    assert _call("formatCell", ["a", 2], "metadata") == '["a",2]'

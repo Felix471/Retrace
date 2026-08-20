@@ -3,15 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Retrace replay</title>
+  <title>Retrace runs</title>
   <style>
     :root { font: 15px/1.45 system-ui, sans-serif; color: #18202b; background: #f4f6f8; }
     * { box-sizing: border-box; } body { margin: 0; } button, input, select { font: inherit; }
-    .layout { min-height: 100vh; display: grid; grid-template-columns: 18rem 1fr; }
-    aside { background: #18202b; color: white; padding: 1rem; overflow: auto; }
-    aside h1 { margin: 0 0 1rem; } nav { display: grid; gap: .35rem; }
-    nav a { color: #dce4ee; text-decoration: none; padding: .65rem; border-radius: .4rem; display: grid; }
-    nav a:hover, nav a.selected { background: #344154; } nav span, nav small { opacity: .8; }
     main { min-width: 0; padding: 1.5rem; } .replay > header { display: flex; align-items: baseline; gap: 1rem; }
     h2 { overflow-wrap: anywhere; } .banner { padding: .75rem 1rem; margin: .6rem 0; border-radius: .35rem; }
     .warning { background: #fff1c7; color: #684c00; } .repair { background: #dff4ea; color: #155d40; }
@@ -32,9 +27,14 @@
     .event-detail { border-top: 1px solid #e1e5ea; padding: .5rem 1rem 1rem; } h4 { margin-bottom: .25rem; }
     pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: .2rem 0; font: .85rem/1.45 ui-monospace, monospace; }
     table { border-collapse: collapse; width: 100%; } th, td { border: 1px solid #d8dee6; padding: .35rem; text-align: left; vertical-align: top; }
+    .batch > header { display: flex; align-items: baseline; gap: 1rem; } .table-controls, .table-controls form { display: flex; flex-wrap: wrap; align-items: end; gap: .6rem; }
+    .table-controls { background: white; padding: .75rem; margin-bottom: 1rem; } .table-controls label { display: grid; gap: .2rem; font-size: .8rem; }
+    .table-controls details label { display: block; white-space: nowrap; } .table-wrap { overflow: auto; background: white; }
+    .run-table { min-width: 60rem; } .run-table tbody tr { cursor: pointer; } .run-table tbody tr:hover, .run-table tbody tr:focus { background: #edf4fb; }
+    .sort { border: 0; background: transparent; font-weight: 700; padding: 0; cursor: pointer; white-space: nowrap; } .back { display: inline-block; margin-bottom: .5rem; }
     .paging { display: flex; gap: .6rem; align-items: center; padding: 1rem 0; } .error { color: #a21d2e; }
     .empty { max-width: 32rem; margin: 15vh auto; text-align: center; color: #647184; }
-    @media (max-width: 700px) { .layout { grid-template-columns: 1fr; } aside { max-height: 15rem; } main { padding: .75rem; } .event { width: 100%; margin-left: 0; } }
+    @media (max-width: 700px) { main { padding: .75rem; } .event { width: 100%; margin-left: 0; } }
   </style>
 </head>
 <body><div id="app">Loading...</div><script type="module" src="/ui/app.js"></script></body>

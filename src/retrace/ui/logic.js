@@ -60,6 +60,62 @@ export function serializeHashState(state) {
   return `#/run/${encodeURIComponent(String(state.runId))}${query ? `?${query}` : ""}`;
 }
 
+const TABLE_DEFAULTS = {
+  sort: "id", order: "asc", outcome: null, metadataKey: null,
+  metadataValue: null, columns: [], offset: 0,
+};
+
+export function parseTableHashState(hash) {
+  const match = String(hash ?? "").match(/^#\/(?:\?(.*))?$/);
+  if (!match) return { ...TABLE_DEFAULTS, columns: [] };
+  const params = new URLSearchParams(match[1] || "");
+  const offset = Number.parseInt(params.get("offset") || "0", 10);
+  return {
+    sort: present(params, "sort") || TABLE_DEFAULTS.sort,
+    order: params.get("order") === "desc" ? "desc" : "asc",
+    outcome: present(params, "outcome"),
+    metadataKey: present(params, "key"),
+    metadataValue: present(params, "value"),
+    columns: params.getAll("column").filter((key, index, values) => key && values.indexOf(key) === index),
+    offset: Number.isFinite(offset) && offset >= 0 ? offset : 0,
+  };
+}
+
+export function serializeTableHashState(state) {
+  const params = new URLSearchParams();
+  if (state?.sort && state.sort !== TABLE_DEFAULTS.sort) params.set("sort", String(state.sort));
+  if (state?.order === "desc") params.set("order", "desc");
+  if (state?.outcome != null && state.outcome !== "") params.set("outcome", String(state.outcome));
+  if (state?.metadataKey != null && state.metadataKey !== "") params.set("key", String(state.metadataKey));
+  if (state?.metadataValue != null && state.metadataValue !== "") params.set("value", String(state.metadataValue));
+  for (const key of state?.columns || []) if (key !== "") params.append("column", String(key));
+  const offset = Number(state?.offset);
+  if (Number.isInteger(offset) && offset > 0) params.set("offset", String(offset));
+  const query = params.toString();
+  return `#/${query ? `?${query}` : ""}`;
+}
+
+export function toggleColumn(selected, key) {
+  const columns = [...new Set(selected || [])];
+  const index = columns.indexOf(key);
+  if (index === -1) columns.push(key);
+  else columns.splice(index, 1);
+  return columns;
+}
+
+export function cycleSort(current, field) {
+  if (current?.sort !== field) return { sort: field, order: "asc" };
+  return { sort: field, order: current.order === "asc" ? "desc" : "asc" };
+}
+
+export function formatCell(value, field) {
+  if (value === null || value === undefined) return "";
+  if (field === "duration_s") return Number(value).toFixed(2);
+  if (field === "total_cost") return Number(value).toFixed(4);
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
 export function matchesSearch(event, query) {
   const needle = String(query ?? "").toLocaleLowerCase();
   if (!needle) return true;

@@ -1,9 +1,15 @@
 import { Component, h, render } from "/ui/vendor/preact.module.js";
 import htm from "/ui/vendor/htm.module.js";
-import { groupByTurn, highlightSegments, laneFor, matchesSearch, parseHashState, previewOf, serializeHashState } from "/ui/logic.js";
+import { cycleSort, formatCell, groupByTurn, highlightSegments, laneFor, matchesSearch, parseHashState, parseTableHashState, previewOf, serializeHashState, serializeTableHashState, toggleColumn } from "/ui/logic.js";
 
 const html = htm.bind(h);
 const PAGE_SIZE = 500;
+const RUN_PAGE_SIZE = 200;
+const SUMMARY_COLUMNS = [
+  ["id", "run id"], ["outcome", "outcome"], ["n_events", "events"],
+  ["n_turns", "turns"], ["duration_s", "duration"], ["total_cost", "cost"],
+  ["ingest_warnings", "warnings"], ["n_repaired", "repaired"],
+];
 
 async function json(url) {
   const response = await fetch(url);
@@ -103,10 +109,11 @@ class Replay extends Component {
       if (request === this.request) this.setState({ busy: false });
     }
   }
-  render({ agent, phase, type, q, onState }, { run, events, total, busy, error }) {
+  render({ agent, phase, type, q, onState, backHash }, { run, events, total, busy, error }) {
   if (error) return html`<p class="error">${error}</p>`;
   if (!run) return html`<p>Loading run...</p>`;
   return html`<section class="replay">
+    <a class="back" href=${backHash}>Back to runs</a>
     <header><h2>${run.id}</h2><span>${run.outcome ?? "No outcome"}</span></header>
     ${run.ingest_warnings > 0 && html`<div class="banner warning">${run.ingest_warnings} ingest warnings in this run</div>`}
     ${run.n_repaired > 0 && html`<div class="banner repair">${run.n_repaired} records repaired in this run</div>`}
@@ -132,21 +139,80 @@ class Replay extends Component {
   }
 }
 
-class App extends Component {
-  state = { runs: [], view: parseHashState(location.hash), error: "" };
-  changed = () => this.setState({ view: parseHashState(location.hash) });
-  updateView = changes => { location.hash = serializeHashState({ ...this.state.view, ...changes }); };
+class BatchTable extends Component {
+  state = { experiment: null, rows: [], total: 0, outcomes: [], busy: false, error: "", draftKey: "", draftValue: "" };
+  request = 0;
   componentDidMount() {
-    json("/api/runs").then(response => this.setState({ runs: response.rows })).catch(reason => this.setState({ error: String(reason) }));
+    this.setState({ draftKey: this.props.view.metadataKey || "", draftValue: this.props.view.metadataValue || "" });
+    json("/api/experiment").then(experiment => this.setState({ experiment })).catch(reason => this.setState({ error: String(reason) }));
+    this.load();
+  }
+  componentDidUpdate(previous) {
+    if (serializeTableHashState(previous.view) !== serializeTableHashState(this.props.view)) {
+      if (previous.view.metadataKey !== this.props.view.metadataKey || previous.view.metadataValue !== this.props.view.metadataValue) {
+        this.setState({ draftKey: this.props.view.metadataKey || "", draftValue: this.props.view.metadataValue || "" });
+      }
+      this.load();
+    }
+  }
+  async load() {
+    const request = ++this.request;
+    const { view } = this.props;
+    const params = new URLSearchParams({ sort: view.sort, order: view.order, limit: RUN_PAGE_SIZE, offset: view.offset });
+    if (view.outcome) params.set("outcome", view.outcome);
+    if (view.metadataKey && view.metadataValue != null) params.set(view.metadataKey, view.metadataValue);
+    this.setState({ busy: true, error: "" });
+    try {
+      const page = await json(`/api/runs?${params}`);
+      if (request === this.request) this.setState(current => ({
+        rows: page.rows, total: page.total, busy: false,
+        outcomes: [...new Set(current.outcomes.concat(page.rows.map(row => row.outcome).filter(value => value != null)))].sort(),
+      }));
+    } catch (reason) {
+      if (request === this.request) this.setState({ busy: false, error: String(reason) });
+    }
+  }
+  render({ view, onState, onOpen }, { experiment, rows, total, outcomes, busy, error, draftKey, draftValue }) {
+    const keys = experiment?.metadata_keys || [];
+    const end = Math.min(view.offset + rows.length, total);
+    return html`<section class="batch"><header><h1>Runs</h1><span>${experiment ? `${experiment.run_count} runs` : "Loading..."}</span></header>
+      <div class="table-controls">
+        <label>Outcome<select value=${view.outcome || ""} onChange=${event => onState({ outcome: event.target.value || null, offset: 0 })}>
+          <option value="">All</option>${[...new Set(outcomes.concat(view.outcome || []))].sort().map(value => html`<option value=${value}>${value}</option>`)}</select></label>
+        <form onSubmit=${event => { event.preventDefault(); onState({ metadataKey: draftKey || null, metadataValue: draftKey && draftValue !== "" ? draftValue : null, offset: 0 }); }}>
+          <label>Metadata key<select value=${draftKey} onChange=${event => this.setState({ draftKey: event.target.value })}>
+            <option value="">Choose key</option>${keys.map(key => html`<option value=${key}>${key}</option>`)}</select></label>
+          <label>Value<input value=${draftValue} onInput=${event => this.setState({ draftValue: event.target.value })} /></label><button>Apply</button>
+        </form>
+        <button onClick=${() => { this.setState({ draftKey: "", draftValue: "" }); onState({ outcome: null, metadataKey: null, metadataValue: null, offset: 0 }); }}>Clear filters</button>
+        <details><summary>Columns</summary>${keys.map(key => html`<label><input type="checkbox" checked=${view.columns.includes(key)} onChange=${() => onState({ columns: toggleColumn(view.columns, key), offset: 0 })} />${key}</label>`)}</details>
+      </div>
+      ${error && html`<p class="error">${error}</p>`}
+      <div class="table-wrap"><table class="run-table"><thead><tr>
+        ${SUMMARY_COLUMNS.map(([field, label]) => html`<th><button class="sort" onClick=${() => onState({ ...cycleSort(view, field), offset: 0 })}>${label}${view.sort === field ? (view.order === "asc" ? " ^" : " v") : ""}</button></th>`)}
+        ${view.columns.map(key => html`<th>${key}</th>`)}</tr></thead><tbody>
+        ${rows.map(row => html`<tr key=${row.id} tabIndex="0" onClick=${() => onOpen(row.id)} onKeyDown=${event => { if (event.key === "Enter") onOpen(row.id); }}>
+          ${SUMMARY_COLUMNS.map(([field]) => html`<td>${formatCell(row[field], field)}</td>`)}
+          ${view.columns.map(key => html`<td>${formatCell(row.metadata[key], key)}</td>`)}</tr>`)}
+      </tbody></table></div>
+      <footer class="paging"><button disabled=${busy || view.offset === 0} onClick=${() => onState({ offset: Math.max(0, view.offset - RUN_PAGE_SIZE) })}>Previous</button>
+        <span>Showing ${total === 0 ? 0 : view.offset + 1}-${end} of ${total}</span>
+        <button disabled=${busy || end >= total} onClick=${() => onState({ offset: view.offset + RUN_PAGE_SIZE })}>Next</button></footer>
+    </section>`;
+  }
+}
+
+class App extends Component {
+  state = { route: location.hash.startsWith("#/run/") ? "run" : "table", view: location.hash.startsWith("#/run/") ? parseHashState(location.hash) : parseTableHashState(location.hash), backHash: "#/" };
+  changed = () => this.setState({ route: location.hash.startsWith("#/run/") ? "run" : "table", view: location.hash.startsWith("#/run/") ? parseHashState(location.hash) : parseTableHashState(location.hash) });
+  updateView = changes => { location.hash = this.state.route === "run" ? serializeHashState({ ...this.state.view, ...changes }) : serializeTableHashState({ ...this.state.view, ...changes }); };
+  openRun = runId => { const backHash = serializeTableHashState(this.state.view); this.setState({ backHash }); location.hash = serializeHashState({ runId }); };
+  componentDidMount() {
     addEventListener("hashchange", this.changed);
   }
   componentWillUnmount() { removeEventListener("hashchange", this.changed); }
-  render(_, { runs, view, error }) {
-  return html`<div class="layout"><aside><h1>Retrace</h1>${error && html`<p class="error">${error}</p>`}
-    <nav>${runs.map(run => html`<a class=${view.runId === run.id ? "selected" : ""} href=${serializeHashState({ runId: run.id })}>
-      <b>${run.id}</b><span>${run.outcome ?? "No outcome"}</span><small>${run.n_events} events; ${run.ingest_warnings} warnings</small>
-    </a>`)}</nav>
-  </aside><main>${view.runId ? html`<${Replay} ...${view} onState=${this.updateView} />` : html`<div class="empty"><h2>Select a run</h2><p>Choose a run from the list to replay its events.</p></div>`}</main></div>`;
+  render(_, { route, view, backHash }) {
+  return html`<main>${route === "run" ? html`<${Replay} ...${view} backHash=${backHash} onState=${this.updateView} />` : html`<${BatchTable} view=${view} onState=${this.updateView} onOpen=${this.openRun} />`}</main>`;
   }
 }
 
