@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import sqlite3
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
@@ -9,6 +11,7 @@ import pytest
 
 from retrace.adapters.registry import resolve_config
 from retrace.core.ingest import ingest
+from retrace.core.model import VALID_EVENT_TYPES
 from retrace.core.store import SqliteStore
 from retrace.server.app import create_app
 
@@ -100,7 +103,17 @@ def test_filter_and_pagination_matrix(
                 type=values.get("type"),
                 limit=2000,
             )
-            expected[index] = ([event.to_dict() for event in events], total)
+            expected[index] = (
+                [
+                    {
+                        **event.to_dict(),
+                        "badge": event.type,
+                        "repaired": [],
+                    }
+                    for event in events
+                ],
+                total,
+            )
 
     async def check(client: httpx.AsyncClient) -> None:
         for index, values in enumerate(filters):
@@ -203,11 +216,39 @@ def test_openapi_documents_run_and_event_response_models(tmp_path: Path) -> None
         assert {"metadata", "started_at", "agents", "types"} <= set(
             models["RunResponse"]["properties"]
         )
-        assert {"structured", "timestamp", "refs"} <= set(
+        assert {"structured", "timestamp", "refs", "badge", "repaired"} <= set(
             models["EventResponse"]["properties"]
         )
         assert "capped at 2000" in models["EventsResponse"]["properties"]["limit"][
             "description"
         ]
+
+    asyncio.run(_with_client(path, check))
+
+
+def test_event_badge_and_repaired_derivation(tmp_path: Path) -> None:
+    path = _database(tmp_path, "avalon_mini")
+    with sqlite3.connect(path) as connection:
+        rows = connection.execute(
+            "SELECT id FROM events WHERE run_id = ? ORDER BY ordinal LIMIT ?",
+            (AVALON_RUN, len(VALID_EVENT_TYPES) + 2),
+        ).fetchall()
+        for (event_id,), event_type in zip(rows, sorted(VALID_EVENT_TYPES), strict=False):
+            connection.execute("UPDATE events SET type = ? WHERE id = ?", (event_type, event_id))
+        connection.execute("UPDATE events SET type = ? WHERE id = ?", ("custom", rows[-2][0]))
+        connection.execute(
+            "UPDATE events SET metadata = ? WHERE id = ?",
+            (json.dumps({"_retrace": {"repaired": "invalid"}}), rows[-1][0]),
+        )
+
+    async def check(client: httpx.AsyncClient) -> None:
+        events = (await client.get(
+            f"/api/runs/{AVALON_RUN}/events", params={"limit": 500}
+        )).json()["events"]
+        badges = {event["type"]: event["badge"] for event in events}
+        assert all(badges[event_type] == event_type for event_type in VALID_EVENT_TYPES)
+        assert events[len(VALID_EVENT_TYPES)]["badge"] == "other"
+        assert events[len(VALID_EVENT_TYPES) + 1]["repaired"] == []
+        assert all(event["repaired"] == [] for event in events)
 
     asyncio.run(_with_client(path, check))

@@ -25,18 +25,6 @@ export function previewOf(content, maxLen = 120) {
   return `${flat.slice(0, Math.max(0, maxLen - 3))}...`;
 }
 
-export function repairedFields(metadata) {
-  const repaired = metadata?._retrace?.repaired;
-  if (!repaired || typeof repaired !== "object" || Array.isArray(repaired)) return [];
-  return Object.entries(repaired).map(([field, original]) => ({ field, original }));
-}
-
-const BADGES = new Set(["message", "tool_call", "tool_result", "system", "other"]);
-
-export function badgeClassFor(type) {
-  return BADGES.has(type) ? type : "other";
-}
-
 function decoded(value) {
   if (value === null || value === "") return null;
   try { return decodeURIComponent(value); } catch { return null; }

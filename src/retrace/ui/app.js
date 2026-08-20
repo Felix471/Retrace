@@ -1,6 +1,6 @@
 import { Component, h, render } from "/ui/vendor/preact.module.js";
 import htm from "/ui/vendor/htm.module.js";
-import { badgeClassFor, groupByTurn, highlightSegments, laneFor, matchesSearch, parseHashState, previewOf, repairedFields, serializeHashState } from "/ui/logic.js";
+import { groupByTurn, highlightSegments, laneFor, matchesSearch, parseHashState, previewOf, serializeHashState } from "/ui/logic.js";
 
 const html = htm.bind(h);
 const PAGE_SIZE = 500;
@@ -16,10 +16,9 @@ function Value({ value }) {
   return JSON.stringify(value, null, 2);
 }
 
-function Metadata({ metadata }) {
+function Metadata({ metadata, repaired }) {
   const provenance = metadata?._retrace;
   const entries = Object.entries(metadata || {}).filter(([key]) => key !== "_retrace");
-  const repaired = repairedFields(metadata);
   return html`
     ${entries.length > 0 && html`<section><h4>Metadata</h4><table><tbody>${entries.map(([key, value]) => html`
       <tr><th>${key}</th><td><pre><${Value} value=${value} /></pre></td></tr>`)}
@@ -45,20 +44,20 @@ class EventRow extends Component {
   state = { open: false };
   render({ event, agentIds, query }, { open }) {
   const lane = laneFor(event.agent_id, agentIds);
-  const repaired = repairedFields(event.metadata).length > 0;
+  const repaired = event.repaired.length > 0;
   const style = lane === null ? {} : { "--lane": lane, "--lanes": Math.max(agentIds.length, lane + 1) };
   return html`<article class=${`event ${lane === null ? "neutral" : `color-${lane % 8}`}`} style=${style}>
     <button class="event-summary" onClick=${() => this.setState({ open: !open })} aria-expanded=${open}>
       <span class="agent">${event.agent_id ?? "system"}</span>
       ${event.role && html`<span class="role">${event.role}</span>`}
-      <span class=${`badge badge-${badgeClassFor(event.type)}`}>${event.type}</span>
+      <span class=${`badge badge-${event.badge}`}>${event.type}</span>
       ${repaired && html`<span class="badge repaired">repaired</span>`}
       <span class="preview"><${Highlighted} text=${previewOf(event.content, 120)} query=${query} /></span>
     </button>
     ${open && html`<div class="event-detail">
       <section><h4>Content</h4><pre><${Highlighted} text=${event.content} query=${query} /></pre></section>
       ${event.structured != null && html`<section><h4>Structured</h4><pre>${JSON.stringify(event.structured, null, 2)}</pre></section>`}
-      <${Metadata} metadata=${event.metadata} />
+      <${Metadata} metadata=${event.metadata} repaired=${event.repaired} />
     </div>`}
   </article>`;
   }

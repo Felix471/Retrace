@@ -70,7 +70,7 @@ def test_run_and_event_replay_contract(tmp_path: Path, fixture: str) -> None:
             run = (await client.get(f"/api/runs/{item['id']}")).json()
             assert {"agent_ids", "ingest_warnings", "n_repaired"} <= set(run)
             page = (await client.get(f"/api/runs/{item['id']}/events", params={"limit": 500})).json()
-            event_fields = {"content", "structured", "metadata", "type", "turn", "agent_id", "role"}
+            event_fields = {"content", "structured", "metadata", "type", "badge", "repaired", "turn", "agent_id", "role"}
             assert all(event_fields <= set(event) for event in page["events"])
             assert all(event["turn"] is not None for event in page["events"])
             if fixture == "support_pipeline":
@@ -89,6 +89,10 @@ def test_repair_provenance_and_long_content_survive_api(tmp_path: Path) -> None:
         repaired = [event for event in events if event["metadata"].get("_retrace", {}).get("repaired")]
         assert len(repaired) == 1
         assert repaired[0]["metadata"]["_retrace"]["repaired"] == {"turn": 4, "result": "fail"}
+        assert repaired[0]["repaired"] == [
+            {"field": "turn", "original": 4},
+            {"field": "result", "original": "fail"},
+        ]
 
         long_events = (await client.get(f"/api/runs/{LONG_CONTENT_RUN}/events", params={"limit": 500})).json()["events"]
         matching = [event["content"] for event in long_events if len(event["content"]) == 500]

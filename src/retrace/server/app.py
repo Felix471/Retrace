@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from retrace.core.model import VALID_EVENT_TYPES, Event
 from retrace.core.store import SqliteStore
 
 
@@ -52,6 +53,13 @@ class RunListItem(BaseModel):
     duration_s: float | None
 
 
+class RepairedFieldResponse(BaseModel):
+    """One field repaired during ingest and its original value."""
+
+    field: str
+    original: Any
+
+
 class EventResponse(BaseModel):
     """One event in its stable run order."""
 
@@ -71,6 +79,12 @@ class EventResponse(BaseModel):
     cost: float | None
     refs: list[str]
     metadata: dict[str, Any]
+    badge: str = Field(
+        description="Closed event type used to select the replay badge style."
+    )
+    repaired: list[RepairedFieldResponse] = Field(
+        description="Repaired fields and their original values, in stored order."
+    )
 
 
 class EventsResponse(BaseModel):
@@ -80,6 +94,27 @@ class EventsResponse(BaseModel):
     total: int
     offset: int
     limit: int = Field(description="Applied page size, capped at 2000.")
+
+
+def _event_payload(event: Event) -> dict[str, Any]:
+    data = event.to_dict()
+    event_type = data["type"]
+    metadata = data["metadata"]
+    provenance = metadata.get("_retrace")
+    repaired_metadata = provenance.get("repaired") if isinstance(provenance, dict) else None
+    repaired = (
+        [
+            {"field": field, "original": original}
+            for field, original in repaired_metadata.items()
+        ]
+        if isinstance(repaired_metadata, dict)
+        else []
+    )
+    return {
+        **data,
+        "badge": event_type if event_type in VALID_EVENT_TYPES else "other",
+        "repaired": repaired,
+    }
 
 
 def create_app(db_path: Path) -> FastAPI:
@@ -166,7 +201,7 @@ def create_app(db_path: Path) -> FastAPI:
             limit=applied_limit,
         )
         return {
-            "events": [event.to_dict() for event in events],
+            "events": [_event_payload(event) for event in events],
             "total": total,
             "offset": offset,
             "limit": applied_limit,

@@ -69,22 +69,6 @@ def test_preview_edges_and_flattening() -> None:
     assert _call("previewOf", "  first\n  second\tthird  ", 30) == "first second third"
 
 
-def test_repaired_fields() -> None:
-    assert _call("repairedFields", {}) == []
-    assert _call(
-        "repairedFields", {"_retrace": {"repaired": {"turn": 4, "result": "fail"}}}
-    ) == [
-        {"field": "turn", "original": 4},
-        {"field": "result", "original": "fail"},
-    ]
-
-
-def test_badge_classes() -> None:
-    for value in ("message", "tool_call", "tool_result", "system", "other"):
-        assert _call("badgeClassFor", value) == value
-    assert _call("badgeClassFor", "custom") == "other"
-
-
 def test_hash_state_round_trip_and_missing_fields() -> None:
     state = {"runId": "run / one", "agent": "A&B", "phase": "round 1", "type": "tool", "q": "caf\u00e9 & tea"}
     encoded = _call("serializeHashState", state)
