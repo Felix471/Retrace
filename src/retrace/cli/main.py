@@ -16,6 +16,7 @@ from retrace import __version__
 from retrace.adapters.discovery import DiscoveryError
 from retrace.adapters.mapping_schema import MappingConfigError
 from retrace.adapters.registry import ConfigResolutionError, resolve_config
+from retrace.cli.init_scaffold import ScaffoldError, scaffold
 from retrace.core.ingest import IngestReport, ingest, stable_root_hash
 from retrace.core.store import SqliteStore
 from retrace.server.app import create_app
@@ -150,10 +151,28 @@ def _view(args: argparse.Namespace) -> int:
     return 0
 
 
+def _init(args: argparse.Namespace) -> int:
+    target = Path(args.out) if args.out else Path.cwd() / "retrace.yaml"
+    if target.exists() and not args.force:
+        print(f"{_ascii(target)} already exists; use --force to overwrite", file=sys.stderr)
+        return 1
+    draft = scaffold(Path(args.path), args.sample)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(draft, encoding="ascii")
+    print(f"Wrote {_ascii(target)}")
+    return 0
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="retrace-logs")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     commands = parser.add_subparsers(dest="command", required=True)
+    init = commands.add_parser("init", help="draft a mapping from sampled logs")
+    init.add_argument("path")
+    init.add_argument("--out")
+    init.add_argument("--sample", type=int, default=200)
+    init.add_argument("--force", action="store_true")
+    init.set_defaults(handler=_init)
     check = commands.add_parser("check", help="inspect what would be ingested")
     check.add_argument("path")
     check.add_argument("--config")
@@ -175,7 +194,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         return args.handler(args)
-    except (ConfigResolutionError, DiscoveryError, MappingConfigError, OSError) as error:
+    except (ConfigResolutionError, DiscoveryError, MappingConfigError, ScaffoldError, OSError) as error:
         print(_ascii(error), file=sys.stderr)
         return 1
 

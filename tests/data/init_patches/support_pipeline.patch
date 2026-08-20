@@ -1,0 +1,6 @@
+--- retrace.yaml
++++ retrace.yaml
+@@ -1,2 +1,2 @@
+-# Draft mapping generated from sampled JSONL records.
++# Draft mapping generated from sampled JSONL records. Reviewed.
+ # Review every evidence comment and resolve TODOs before relying on the data.
