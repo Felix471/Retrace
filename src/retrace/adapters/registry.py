@@ -19,6 +19,7 @@ from retrace.adapters.mapping_schema import (
 )
 
 _BUILTIN_PACKAGE = "retrace.adapters.builtin"
+_BUILTIN_NAMES = ("avalon", "support_pipeline")
 
 __all__ = [
     "ConfigResolutionError",
@@ -35,9 +36,7 @@ class ConfigResolutionError(LookupError):
 
 def builtin_names() -> tuple[str, ...]:
     """Return packaged built-in names in stable registry order."""
-    package = resources.files(_BUILTIN_PACKAGE)
-    return tuple(sorted(item.name.removesuffix(".yaml") for item in package.iterdir()
-                        if item.name.endswith(".yaml")))
+    return _BUILTIN_NAMES
 
 
 def load_builtin(name: str) -> tuple[MappingConfig, str]:

@@ -9,6 +9,7 @@ import yaml
 from retrace.adapters.mapping_schema import MappingConfig
 from retrace.adapters.registry import (
     ConfigResolutionError,
+    builtin_names,
     load_builtin,
     resolve_config,
     sniff_config,
@@ -38,12 +39,17 @@ def test_builtin_loads_as_packaged_resource() -> None:
     assert adapter_ref == "builtin:avalon"
 
 
-def test_resolution_sniffs_fixture_and_rejects_unrelated_shape() -> None:
-    _, adapter_ref = resolve_config(FIXTURES / "avalon_mini")
-    assert adapter_ref == "builtin:avalon"
+def test_resolution_disambiguates_builtins_in_deterministic_order() -> None:
+    assert builtin_names() == ("avalon", "support_pipeline")
+    assert resolve_config(FIXTURES / "avalon_mini")[1] == "builtin:avalon"
+    assert resolve_config(FIXTURES / "support_pipeline")[1] == "builtin:support_pipeline"
+
+
+def test_resolution_rejects_unmatched_root(tmp_path: Path) -> None:
+    (tmp_path / "unmatched.jsonl").write_text('{"unrelated": true}\n', encoding="utf-8")
 
     with pytest.raises(ConfigResolutionError, match=r"retrace init"):
-        resolve_config(FIXTURES / "support_pipeline")
+        resolve_config(tmp_path)
 
 
 def test_explicit_and_target_local_configs_precede_sniffing(tmp_path: Path) -> None:
