@@ -1,0 +1,29 @@
+# Local-only inputs: verbatim corpus content (incl. an unscrubbed CoT leak)
+# and the survey that quotes it. See DESIGN.md D21 / AUDIT.md §J.
+reference-logs/
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Packaging output
+build/
+dist/
+*.egg-info/
+
+# Coverage output
+.coverage
+htmlcov/
+
+# IDE settings and pre-project scratch (local-only)
+.idea/
+main.py
