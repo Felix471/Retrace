@@ -25,6 +25,7 @@ from retrace.adapters.mapping_schema import (
     MappingConfigError,
 )
 from retrace.adapters.repair import RepairPlan, RepairResult
+from retrace.adapters.roster import RosterJoin, RosterTable
 
 __all__ = [
     "MergedEvent",
@@ -56,6 +57,10 @@ class MultiSourceEvent:
 MergedEvent = MultiSourceEvent
 
 
+def _new_roster_warning_counts() -> dict[str, int]:
+    return {category: 0 for category in ("path", "key", "duplicate", "unmatched")}
+
+
 @dataclass(slots=True)
 class MultiSourceStats(ExtractionStats):
     """Counters accumulated while exploding and merging source arrays."""
@@ -69,6 +74,9 @@ class MultiSourceStats(ExtractionStats):
     repair_evaluation_failures: dict[tuple[str, str], int] = field(default_factory=dict)
     n_repaired_by_source: dict[str, int] = field(default_factory=dict)
     n_repaired: int = 0
+    roster_warning_counts: dict[str, int] = field(
+        default_factory=_new_roster_warning_counts
+    )
 
     @property
     def source_records(self) -> dict[str, int]:
@@ -77,10 +85,46 @@ class MultiSourceStats(ExtractionStats):
 
     @property
     def total_warnings(self) -> int:
-        """Return extraction, sorting, repair, and repair-evaluation warnings."""
+        """Return extraction, sorting, repair, and roster-join warnings."""
         field_failures = sum(counter.failures for counter in self.fields.values())
         repair_failures = sum(self.repair_evaluation_failures.values())
-        return field_failures + self.none_sort_key_events + repair_failures + self.n_repaired
+        return (
+            field_failures
+            + self.none_sort_key_events
+            + repair_failures
+            + self.n_repaired
+            + self.join_warnings
+        )
+
+    @property
+    def join_warning_counts(self) -> dict[str, int]:
+        """Alias for the per-category roster warning counters."""
+        return self.roster_warning_counts
+
+    @property
+    def join_warnings(self) -> int:
+        """Return roster warning categories accumulated across runs."""
+        return sum(self.roster_warning_counts.values())
+
+    @property
+    def roster_path_warnings(self) -> int:
+        """Return runs whose roster path did not produce an array."""
+        return self.roster_warning_counts["path"]
+
+    @property
+    def roster_key_warnings(self) -> int:
+        """Return runs whose roster produced no usable lookup key."""
+        return self.roster_warning_counts["key"]
+
+    @property
+    def roster_duplicate_warnings(self) -> int:
+        """Return runs with one or more duplicate normalized roster keys."""
+        return self.roster_warning_counts["duplicate"]
+
+    @property
+    def roster_unmatched_warnings(self) -> int:
+        """Return runs with one or more unmatched non-null event identifiers."""
+        return self.roster_warning_counts["unmatched"]
 
     @property
     def repaired_record_counts(self) -> dict[str, int]:
@@ -136,6 +180,7 @@ class MultiSourceExtractor:
 
         self.config = config
         self.stats = MultiSourceStats()
+        self._roster_join = RosterJoin(config.agents) if config.agents is not None else None
         self._sources: list[_SourcePlan] = []
         for index, source in enumerate(sources):
             stats_prefix = f"event.sources.{source.name}"
@@ -308,6 +353,37 @@ class MultiSourceExtractor:
             self.stats.n_repaired_by_source[source.config.name] += 1
             self.stats.n_repaired += 1
 
+    def _join_candidates(
+        self,
+        run_record: dict[str, object],
+        candidates: list[_Candidate],
+    ) -> list[_Candidate]:
+        join = self._roster_join
+        if join is None:
+            return candidates
+
+        table = join.build(run_record)
+        joined: list[_Candidate] = []
+        for candidate in candidates:
+            event = candidate.event
+            result = table.apply(event.agent_id, event.role, event.metadata)
+            joined.append(
+                replace(
+                    candidate,
+                    event=replace(
+                        event,
+                        role=result.role,
+                        metadata=result.metadata,
+                    ),
+                )
+            )
+        self._record_roster_warnings(table)
+        return joined
+
+    def _record_roster_warnings(self, table: RosterTable) -> None:
+        for category, count in table.warnings.as_dict().items():
+            self.stats.roster_warning_counts[category] += count
+
     def _ordered_candidates(self, candidates: list[_Candidate]) -> list[_Candidate]:
         if self._sort_by is None:
             return sorted(candidates, key=lambda item: (item.priority, item.source_ordinal))
@@ -337,5 +413,6 @@ class MultiSourceExtractor:
                 for source_ordinal, record in enumerate(records)
             )
 
-        ordered = self._ordered_candidates(candidates)
+        joined = self._join_candidates(run_record, candidates)
+        ordered = self._ordered_candidates(joined)
         return [replace(candidate.event, ordinal=ordinal) for ordinal, candidate in enumerate(ordered)]

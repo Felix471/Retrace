@@ -31,24 +31,67 @@ def _config(
     sources: list[dict[str, object]],
     *,
     merge: dict[str, object] | None = None,
+    agents: dict[str, object] | None = None,
 ) -> dict[str, object]:
     event: dict[str, object] = {"sources": sources}
     if merge is not None:
         event["merge"] = merge
-    return {
+    config: dict[str, object] = {
         "retrace_mapping": 1,
         "run_discovery": {"pattern": "records/*.jsonl"},
         "run": {"id": "{file_stem}"},
         "event": event,
     }
+    if agents is not None:
+        config["agents"] = agents
+    return config
 
 
 def _extractor(
     sources: list[dict[str, object]],
     *,
     merge: dict[str, object] | None = None,
+    agents: dict[str, object] | None = None,
 ) -> MultiSourceExtractor:
-    return MultiSourceExtractor(validate_mapping_config(_config(sources, merge=merge)))
+    return MultiSourceExtractor(
+        validate_mapping_config(_config(sources, merge=merge, agents=agents))
+    )
+
+
+def _roster_sources(*, event_role: str | None = None) -> list[dict[str, object]]:
+    fields: dict[str, object] = {"agent_id": "speakerId", "content": "content"}
+    if event_role is not None:
+        fields["role"] = event_role
+    return [
+        {
+            "name": "discussions",
+            "path": "discussions",
+            "type": "message",
+            "priority": 0,
+            "fields": fields,
+        },
+        {
+            "name": "team_proposals",
+            "path": "teamProposals",
+            "type": "other",
+            "priority": 1,
+            "fields": {"agent_id": "proposedBy"},
+        },
+        {
+            "name": "quests",
+            "path": "quests",
+            "type": "other",
+            "priority": 2,
+            "fields": {"agent_id": "proposedBy"},
+        },
+    ]
+
+
+ROSTER_CONFIG = {
+    "path": "players",
+    "key": "id",
+    "attributes": {"role": "role", "model": "model", "provider": "provider"},
+}
 
 
 def _first_record(path: Path) -> dict[str, object]:
@@ -56,10 +99,314 @@ def _first_record(path: Path) -> dict[str, object]:
         return json.loads(stream.readline())
 
 
+def _records(path: Path) -> list[dict[str, object]]:
+    with path.open(encoding="utf-8") as stream:
+        return [json.loads(line) for line in stream]
+
+
 def _provenance(event: MultiSourceEvent) -> dict[str, object]:
     value = event.metadata["_retrace"]
     assert isinstance(value, dict)
     return value
+
+
+@pytest.mark.parametrize("sample_path", SAMPLE_INPUTS)
+def test_roster_join_matches_each_run_entity_array(sample_path: Path) -> None:
+    extractor = _extractor(_roster_sources(), agents=ROSTER_CONFIG)
+
+    for record in _records(sample_path):
+        roster = {str(entry["id"]): entry for entry in record["players"]}
+        events = extractor.extract_events(record)
+        assert events
+        for event in events:
+            assert event.agent_id is not None
+            expected = roster[event.agent_id]
+            assert event.role == expected["role"]
+            assert event.metadata["_retrace"]["agent"] == {
+                "model": expected["model"],
+                "provider": expected["provider"],
+            }
+
+        speakers = {
+            event.agent_id
+            for event in events
+            if _provenance(event)["source"] == "discussions"
+        }
+        assert len(speakers) >= 3
+        for source_name in ("team_proposals", "quests"):
+            assert any(
+                _provenance(event)["source"] == source_name for event in events
+            )
+
+    assert extractor.stats.join_warnings == 0
+    assert extractor.stats.join_warning_counts == {
+        "path": 0,
+        "key": 0,
+        "duplicate": 0,
+        "unmatched": 0,
+    }
+
+
+def test_no_agents_section_leaves_events_unjoined_and_otherwise_identical() -> None:
+    record = _first_record(COMMITTED_SAMPLE)
+    joined_extractor = _extractor(_roster_sources(), agents=ROSTER_CONFIG)
+    plain_extractor = _extractor(_roster_sources())
+
+    joined = joined_extractor.extract_events(record)
+    plain = plain_extractor.extract_events(record)
+
+    assert all(event.role is None for event in plain)
+    assert plain_extractor.stats.join_warnings == 0
+    assert len(joined) == len(plain)
+    for joined_event, plain_event in zip(joined, plain, strict=True):
+        joined_engine = dict(_provenance(joined_event))
+        joined_engine.pop("agent")
+        assert plain_event == joined_event.__class__(
+            **{
+                name: getattr(joined_event, name)
+                for name in joined_event.__dataclass_fields__
+                if name not in {"role", "metadata"}
+            },
+            role=None,
+            metadata={"_retrace": joined_engine},
+        )
+
+
+def test_partial_roster_warns_once_and_joins_remaining_events() -> None:
+    record = {
+        "members": [{"code": 1, "details": {"job": "lead"}, "engine": "a"}],
+        "entries": [
+            {"who": "1", "text": "matched"},
+            {"who": "2", "text": "missing one"},
+            {"who": "2", "text": "missing twice"},
+        ],
+    }
+    extractor = _extractor(
+        [
+            {
+                "name": "entries",
+                "path": "entries",
+                "fields": {"agent_id": "who", "content": "text"},
+            }
+        ],
+        agents={
+            "path": "members",
+            "key": "code",
+            "attributes": {"role": "details.job", "runtime": "engine"},
+        },
+    )
+
+    events = extractor.extract_events(record)
+
+    assert events[0].role == "lead"
+    assert events[0].metadata["_retrace"]["agent"] == {"runtime": "a"}
+    assert [event.role for event in events[1:]] == [None, None]
+    assert all("agent" not in _provenance(event) for event in events[1:])
+    assert extractor.stats.join_warning_counts["unmatched"] == 1
+    assert extractor.stats.join_warnings == 1
+
+
+def test_event_role_precedes_joined_role_in_multisource_extraction() -> None:
+    extractor = _extractor(
+        _roster_sources(event_role="eventRole"), agents=ROSTER_CONFIG
+    )
+    record = {
+        "players": [{"id": 1, "role": "roster", "model": "m", "provider": "p"}],
+        "discussions": [
+            {"speakerId": 1, "eventRole": "event", "content": "text"}
+        ],
+        "teamProposals": [],
+        "quests": [],
+    }
+
+    event = extractor.extract_events(record)[0]
+
+    assert event.role == "event"
+    assert event.metadata["_retrace"]["agent"] == {"model": "m", "provider": "p"}
+
+
+def test_duplicate_roster_keys_keep_first_and_reach_aggregate_stats() -> None:
+    extractor = _extractor(
+        [
+            {
+                "name": "entries",
+                "path": "entries",
+                "fields": {"agent_id": "owner", "content": "body"},
+            }
+        ],
+        agents={
+            "path": "directory",
+            "key": "code",
+            "attributes": {"role": "function", "model": "engine"},
+        },
+    )
+    record = {
+        "directory": [
+            {"code": 4, "function": "first", "engine": "engine-a"},
+            {"code": "4", "function": "second", "engine": "engine-b"},
+        ],
+        "entries": [{"owner": 4, "body": "kept"}],
+    }
+
+    event = extractor.extract_events(record)[0]
+
+    assert event.role == "first"
+    assert _provenance(event)["agent"] == {"model": "engine-a"}
+    assert extractor.stats.roster_duplicate_warnings == 1
+    assert extractor.stats.join_warnings == 1
+    assert extractor.stats.total_warnings == 1
+
+
+@pytest.mark.parametrize(
+    ("agents", "roster_data", "category"),
+    (
+        (
+            {
+                "path": "directory.members",
+                "key": "code",
+                "attributes": {"model": "engine"},
+            },
+            {},
+            "path",
+        ),
+        (
+            {
+                "path": "directory",
+                "key": "code",
+                "attributes": {"model": "engine"},
+            },
+            {"directory": {"code": 1}},
+            "path",
+        ),
+        (
+            {
+                "path": "directory",
+                "key": "code",
+                "attributes": {"model": "engine"},
+            },
+            {"directory": [{"other": 1}, {"code": None}]},
+            "key",
+        ),
+    ),
+    ids=("missing-path", "non-array-path", "no-usable-key"),
+)
+def test_unavailable_rosters_warn_once_and_leave_extraction_unchanged(
+    agents: dict[str, object],
+    roster_data: dict[str, object],
+    category: str,
+) -> None:
+    extractor = _extractor(
+        [
+            {
+                "name": "entries",
+                "path": "entries",
+                "fields": {"agent_id": "owner", "content": "body"},
+            }
+        ],
+        agents=agents,
+    )
+    record = {
+        **roster_data,
+        "entries": [{"owner": "missing", "body": "unchanged"}],
+    }
+
+    event = extractor.extract_events(record)[0]
+
+    assert event.content == "unchanged"
+    assert event.role is None
+    assert "agent" not in _provenance(event)
+    assert extractor.stats.join_warning_counts == {
+        "path": int(category == "path"),
+        "key": int(category == "key"),
+        "duplicate": 0,
+        "unmatched": 0,
+    }
+    assert extractor.stats.join_warnings == 1
+    assert extractor.stats.total_warnings == 1
+
+
+def test_repaired_agent_identifier_is_used_by_the_roster_join() -> None:
+    extractor = _extractor(
+        [
+            {
+                "name": "entries",
+                "path": "entries",
+                "fields": {"agent_id": "logged", "content": "body"},
+                "repairs": [
+                    {
+                        "field": "agent_id",
+                        "strategy": "derive",
+                        "expr": "corrected",
+                    }
+                ],
+            }
+        ],
+        agents={
+            "path": "directory",
+            "key": "code",
+            "attributes": {"role": "function", "model": "engine"},
+        },
+    )
+    source = {"logged": "stale", "corrected": "current", "body": "message"}
+    record = {
+        "directory": [
+            {"code": "current", "function": "reviewer", "engine": "engine-a"}
+        ],
+        "entries": [source],
+    }
+
+    event = extractor.extract_events(record)[0]
+
+    assert event.agent_id == "current"
+    assert event.role == "reviewer"
+    assert _provenance(event) == {
+        "source": "entries",
+        "source_ordinal": 0,
+        "repaired": {"agent_id": "stale"},
+        "agent": {"model": "engine-a"},
+    }
+    assert event.structured is source
+    assert extractor.stats.n_repaired == 1
+    assert extractor.stats.join_warnings == 0
+    assert extractor.stats.total_warnings == 1
+
+
+def test_joined_role_is_available_to_merge_sorting() -> None:
+    extractor = _extractor(
+        [
+            {
+                "name": "entries",
+                "path": "entries",
+                "fields": {"agent_id": "owner", "content": "body"},
+            }
+        ],
+        merge={"sort_by": "role"},
+        agents={
+            "path": "directory",
+            "key": "code",
+            "attributes": {"role": "function"},
+        },
+    )
+    record = {
+        "directory": [
+            {"code": 1, "function": "later"},
+            {"code": 2, "function": "earlier"},
+        ],
+        "entries": [
+            {"owner": 1, "body": "one"},
+            {"owner": 2, "body": "two"},
+        ],
+    }
+
+    events = extractor.extract_events(record)
+
+    assert [(event.role, event.content) for event in events] == [
+        ("earlier", "two"),
+        ("later", "one"),
+    ]
+    assert extractor.stats.none_sort_key_events == 0
+    assert extractor.stats.join_warnings == 0
+    assert extractor.stats.total_warnings == 0
 
 
 @pytest.mark.parametrize("sample_path", SAMPLE_INPUTS)
