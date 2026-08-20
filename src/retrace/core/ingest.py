@@ -277,6 +277,7 @@ def ingest(
     experiment_id = stable_root_hash(root)
     known_fingerprints = store.fingerprints()
     existing = {run.id: run for run in store.list_runs()}
+    store.meta_set("discovery_unit", config.run_discovery.unit)
 
     if config.run_discovery.unit == "line":
         candidate_files = _line_files(config, root)

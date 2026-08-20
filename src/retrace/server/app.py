@@ -11,12 +11,13 @@ from typing import Annotated, Any
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from retrace.core.aggregate import aggregate_runs
 from retrace.core.mast import FAILURE_MODE_CATEGORIES
 from retrace.core.model import VALID_EVENT_TYPES, Event
 from retrace.core.store import SqliteStore
+from retrace.core.tags import CorruptSidecarError, TagPathError, TagService, TagValidationError
 
 RUN_SORT_FIELDS = (
     "id",
@@ -158,6 +159,49 @@ class TagVocabularyResponse(BaseModel):
     categories: list[FailureModeCategoryResponse]
 
 
+class TagModel(BaseModel):
+    """One persisted MAST annotation."""
+
+    mode: str
+    event_ids: list[str] = Field(default_factory=list)
+    note: str = ""
+    source: str = "manual"
+    confidence: float | None = None
+    created_at: str | None = None
+
+    @field_validator("mode")
+    @classmethod
+    def valid_mode(cls, value: str) -> str:
+        from retrace.core.mast import FAILURE_MODES_BY_ID
+
+        if value not in FAILURE_MODES_BY_ID:
+            raise ValueError("unknown MAST mode")
+        return value
+
+
+class StoredTagModel(TagModel):
+    """A stored tag decorated with detached anchors."""
+
+    created_at: str
+    detached_event_ids: list[str] = Field(default_factory=list)
+
+
+class TagsPutRequest(BaseModel):
+    """Replacement tag state for one run."""
+
+    tags: list[TagModel]
+    run_note: str = ""
+
+
+class TagsResponse(BaseModel):
+    """Current tag state and any non-fatal read warning."""
+
+    run_id: str
+    tags: list[StoredTagModel]
+    run_note: str
+    warning: str | None = None
+
+
 def _event_payload(event: Event) -> dict[str, Any]:
     data = event.to_dict()
     event_type = data["type"]
@@ -186,10 +230,12 @@ def create_app(db_path: Path) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         store = SqliteStore(db_path)
         app.state.store = store
+        app.state.tags = TagService(store)
         try:
             yield
         finally:
             store.close()
+            del app.state.tags
             del app.state.store
 
     app = FastAPI(lifespan=lifespan)
@@ -293,6 +339,33 @@ def create_app(db_path: Path) -> FastAPI:
             "types": store.distinct_types(run_id),
         }
 
+    @app.get("/api/runs/{run_id}/tags", response_model=TagsResponse)
+    async def run_tags(request: Request, run_id: str) -> dict[str, Any]:
+        store: SqliteStore = request.app.state.store
+        if store.get_run(run_id) is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+        try:
+            service: TagService = request.app.state.tags
+            return service.get(run_id)
+        except TagPathError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.put("/api/runs/{run_id}/tags", response_model=TagsResponse)
+    async def replace_run_tags(
+        request: Request, run_id: str, payload: TagsPutRequest
+    ) -> dict[str, Any]:
+        store: SqliteStore = request.app.state.store
+        if store.get_run(run_id) is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+        try:
+            tags = [tag.model_dump(exclude_none=False) for tag in payload.tags]
+            service: TagService = request.app.state.tags
+            return service.put(run_id, tags, payload.run_note)
+        except TagValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except (CorruptSidecarError, TagPathError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     @app.get("/api/runs/{run_id}/events", response_model=EventsResponse)
     async def run_events(
         request: Request,
@@ -339,6 +412,9 @@ __all__ = [
     "RunListItem",
     "RunResponse",
     "RunsResponse",
+    "TagModel",
     "TagVocabularyResponse",
+    "TagsPutRequest",
+    "TagsResponse",
     "create_app",
 ]
