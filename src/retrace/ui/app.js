@@ -1,15 +1,9 @@
 import { Component, h, render } from "/ui/vendor/preact.module.js";
 import htm from "/ui/vendor/htm.module.js";
-import { badgeClassFor, groupByTurn, laneFor, previewOf, repairedFields } from "/ui/logic.js";
+import { badgeClassFor, groupByTurn, highlightSegments, laneFor, matchesSearch, parseHashState, previewOf, repairedFields, serializeHashState } from "/ui/logic.js";
 
 const html = htm.bind(h);
 const PAGE_SIZE = 500;
-
-function selectedFromHash() {
-  const match = location.hash.match(/^#\/run\/(.*)$/);
-  if (!match) return null;
-  try { return decodeURIComponent(match[1]); } catch { return null; }
-}
 
 async function json(url) {
   const response = await fetch(url);
@@ -41,9 +35,15 @@ function Metadata({ metadata }) {
   `;
 }
 
+function Highlighted({ text, query }) {
+  return highlightSegments(text, query).map(segment => segment.match
+    ? html`<span class="search-match">${segment.text}</span>`
+    : segment.text);
+}
+
 class EventRow extends Component {
   state = { open: false };
-  render({ event, agentIds }, { open }) {
+  render({ event, agentIds, query }, { open }) {
   const lane = laneFor(event.agent_id, agentIds);
   const repaired = repairedFields(event.metadata).length > 0;
   const style = lane === null ? {} : { "--lane": lane, "--lanes": Math.max(agentIds.length, lane + 1) };
@@ -53,10 +53,10 @@ class EventRow extends Component {
       ${event.role && html`<span class="role">${event.role}</span>`}
       <span class=${`badge badge-${badgeClassFor(event.type)}`}>${event.type}</span>
       ${repaired && html`<span class="badge repaired">repaired</span>`}
-      <span class="preview">${previewOf(event.content, 120)}</span>
+      <span class="preview"><${Highlighted} text=${previewOf(event.content, 120)} query=${query} /></span>
     </button>
     ${open && html`<div class="event-detail">
-      <section><h4>Content</h4><pre>${event.content}</pre></section>
+      <section><h4>Content</h4><pre><${Highlighted} text=${event.content} query=${query} /></pre></section>
       ${event.structured != null && html`<section><h4>Structured</h4><pre>${JSON.stringify(event.structured, null, 2)}</pre></section>`}
       <${Metadata} metadata=${event.metadata} />
     </div>`}
@@ -66,9 +66,13 @@ class EventRow extends Component {
 
 class Replay extends Component {
   state = { run: null, events: [], total: 0, busy: false, error: "" };
+  request = 0;
   componentDidMount() { this.reset(this.props.runId); }
   componentDidUpdate(previous) {
     if (previous.runId !== this.props.runId) this.reset(this.props.runId);
+    else if (previous.agent !== this.props.agent || previous.phase !== this.props.phase || previous.type !== this.props.type) {
+      this.load(0, false);
+    }
   }
   reset(runId) {
     this.setState({ run: null, events: [], total: 0, error: "" });
@@ -76,53 +80,74 @@ class Replay extends Component {
     this.load(0, false, runId);
   }
   async load(offset, all = false, runId = this.props.runId) {
-    this.setState({ busy: true });
+    const request = offset === 0 ? ++this.request : this.request;
+    const filters = { agent: this.props.agent, phase: this.props.phase, type: this.props.type };
+    this.setState(offset === 0 ? { busy: true, events: [], total: 0 } : { busy: true });
     try {
       let loaded = [];
       let next = offset;
       let knownTotal = this.state.total;
       do {
-        const page = await json(`/api/runs/${encodeURIComponent(runId)}/events?offset=${next}&limit=${PAGE_SIZE}`);
+        const params = new URLSearchParams({ offset: next, limit: PAGE_SIZE });
+        for (const key of ["agent", "phase", "type"]) if (filters[key]) params.set(key, filters[key]);
+        const page = await json(`/api/runs/${encodeURIComponent(runId)}/events?${params}`);
         loaded = loaded.concat(page.events);
         knownTotal = page.total;
         next += page.events.length;
       } while (all && next < knownTotal);
-      this.setState(current => ({ events: offset === 0 ? loaded : current.events.concat(loaded), total: knownTotal }));
-    } catch (reason) { this.setState({ error: String(reason) }); } finally { this.setState({ busy: false }); }
+      if (request === this.request) {
+        this.setState(current => ({ events: offset === 0 ? loaded : current.events.concat(loaded), total: knownTotal }));
+      }
+    } catch (reason) {
+      if (request === this.request) this.setState({ error: String(reason) });
+    } finally {
+      if (request === this.request) this.setState({ busy: false });
+    }
   }
-  render(_, { run, events, total, busy, error }) {
+  render({ agent, phase, type, q, onState }, { run, events, total, busy, error }) {
   if (error) return html`<p class="error">${error}</p>`;
   if (!run) return html`<p>Loading run...</p>`;
   return html`<section class="replay">
     <header><h2>${run.id}</h2><span>${run.outcome ?? "No outcome"}</span></header>
     ${run.ingest_warnings > 0 && html`<div class="banner warning">${run.ingest_warnings} ingest warnings in this run</div>`}
     ${run.n_repaired > 0 && html`<div class="banner repair">${run.n_repaired} records repaired in this run</div>`}
-    <div class="timeline">${groupByTurn(events).map(group => html`<section class="turn">
+    <div class="filters">
+      <label>Agent<select value=${agent || ""} onChange=${event => onState({ agent: event.target.value || null })}>
+        <option value="">All</option>${run.agents.map(value => html`<option value=${value}>${value}</option>`)}</select></label>
+      <label>Phase<select value=${phase || ""} onChange=${event => onState({ phase: event.target.value || null })}>
+        <option value="">All</option>${run.phases.map(value => html`<option value=${value}>${value}</option>`)}</select></label>
+      <label>Type<select value=${type || ""} onChange=${event => onState({ type: event.target.value || null })}>
+        <option value="">All</option>${run.types.map(value => html`<option value=${value}>${value}</option>`)}</select></label>
+      <label class="search">Search<input type="search" value=${q || ""} onInput=${event => onState({ q: event.target.value || null })} /></label>
+    </div>
+    ${(() => { const matching = events.filter(event => matchesSearch(event, q)); return html`
+    <div class="timeline">${groupByTurn(matching).map(group => html`<section class="turn">
       <h3>Turn ${group.turn}</h3>
-      ${group.events.map(event => html`<${EventRow} key=${event.id} event=${event} agentIds=${run.agent_ids} />`)}
+      ${group.events.map(event => html`<${EventRow} key=${event.id} event=${event} agentIds=${run.agent_ids} query=${q} />`)}
     </section>`)}</div>
-    <footer class="paging"><span>${events.length} / ${total} loaded</span>
+    <footer class="paging"><span>${events.length} of ${total} loaded, ${matching.length} matching</span>
       ${events.length < total && html`<button disabled=${busy} onClick=${() => this.load(events.length)}>Load more</button>`}
       ${events.length < total && html`<button disabled=${busy} onClick=${() => this.load(events.length, true)}>Load all</button>`}
-    </footer>
+    </footer>`; })()}
   </section>`;
   }
 }
 
 class App extends Component {
-  state = { runs: [], selected: selectedFromHash(), error: "" };
-  changed = () => this.setState({ selected: selectedFromHash() });
+  state = { runs: [], view: parseHashState(location.hash), error: "" };
+  changed = () => this.setState({ view: parseHashState(location.hash) });
+  updateView = changes => { location.hash = serializeHashState({ ...this.state.view, ...changes }); };
   componentDidMount() {
     json("/api/runs").then(runs => this.setState({ runs })).catch(reason => this.setState({ error: String(reason) }));
     addEventListener("hashchange", this.changed);
   }
   componentWillUnmount() { removeEventListener("hashchange", this.changed); }
-  render(_, { runs, selected, error }) {
+  render(_, { runs, view, error }) {
   return html`<div class="layout"><aside><h1>Retrace</h1>${error && html`<p class="error">${error}</p>`}
-    <nav>${runs.map(run => html`<a class=${selected === run.id ? "selected" : ""} href=${`#/run/${encodeURIComponent(run.id)}`}>
+    <nav>${runs.map(run => html`<a class=${view.runId === run.id ? "selected" : ""} href=${serializeHashState({ runId: run.id })}>
       <b>${run.id}</b><span>${run.outcome ?? "No outcome"}</span><small>${run.n_events} events; ${run.ingest_warnings} warnings</small>
     </a>`)}</nav>
-  </aside><main>${selected ? html`<${Replay} runId=${selected} />` : html`<div class="empty"><h2>Select a run</h2><p>Choose a run from the list to replay its events.</p></div>`}</main></div>`;
+  </aside><main>${view.runId ? html`<${Replay} ...${view} onState=${this.updateView} />` : html`<div class="empty"><h2>Select a run</h2><p>Choose a run from the list to replay its events.</p></div>`}</main></div>`;
   }
 }
 

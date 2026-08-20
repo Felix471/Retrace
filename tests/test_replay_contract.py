@@ -97,6 +97,21 @@ def test_repair_provenance_and_long_content_survive_api(tmp_path: Path) -> None:
     asyncio.run(_with_client(path, check))
 
 
+def test_advertised_replay_filters_have_events(tmp_path: Path) -> None:
+    path = _database(tmp_path, "avalon_mini")
+
+    async def check(client: httpx.AsyncClient) -> None:
+        run_id = (await client.get("/api/runs")).json()[0]["id"]
+        run = (await client.get(f"/api/runs/{run_id}")).json()
+        for field, values in (("agent", run["agents"]), ("phase", run["phases"]), ("type", run["types"])):
+            for value in values:
+                page = (await client.get(f"/api/runs/{run_id}/events", params={field: value, "limit": 1})).json()
+                assert page["total"] >= 1
+                assert len(page["events"]) == 1
+
+    asyncio.run(_with_client(path, check))
+
+
 def test_ui_sources_are_format_neutral() -> None:
     forbidden = (
         "speakerId", "gameId", "proposedBy", "quests", "discussions", "winner",

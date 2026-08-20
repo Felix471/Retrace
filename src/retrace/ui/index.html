@@ -6,7 +6,7 @@
   <title>Retrace replay</title>
   <style>
     :root { font: 15px/1.45 system-ui, sans-serif; color: #18202b; background: #f4f6f8; }
-    * { box-sizing: border-box; } body { margin: 0; } button { font: inherit; }
+    * { box-sizing: border-box; } body { margin: 0; } button, input, select { font: inherit; }
     .layout { min-height: 100vh; display: grid; grid-template-columns: 18rem 1fr; }
     aside { background: #18202b; color: white; padding: 1rem; overflow: auto; }
     aside h1 { margin: 0 0 1rem; } nav { display: grid; gap: .35rem; }
@@ -15,6 +15,9 @@
     main { min-width: 0; padding: 1.5rem; } .replay > header { display: flex; align-items: baseline; gap: 1rem; }
     h2 { overflow-wrap: anywhere; } .banner { padding: .75rem 1rem; margin: .6rem 0; border-radius: .35rem; }
     .warning { background: #fff1c7; color: #684c00; } .repair { background: #dff4ea; color: #155d40; }
+    .filters { display: flex; flex-wrap: wrap; gap: .65rem; margin: 1rem 0; padding: .75rem; background: white; border-radius: .35rem; }
+    .filters label { display: grid; gap: .2rem; font-size: .8rem; color: #526071; } .filters select, .filters input { min-width: 9rem; padding: .35rem; border: 1px solid #bbc4cf; border-radius: .25rem; color: #18202b; background: white; }
+    .filters .search { flex: 1; } .filters .search input { width: 100%; } .search-match { background: #ffe36e; color: inherit; border-radius: .1rem; }
     .turn { border-left: 2px solid #ccd3dd; padding: .2rem 0 1rem 1rem; } .turn h3 { margin: .35rem 0; }
     .event { width: calc(100% / var(--lanes, 1)); margin-left: calc(var(--lane, 0) * 100% / var(--lanes, 1)); border-left: .35rem solid; background: white; box-shadow: 0 1px 3px #0002; margin-bottom: .45rem; }
     .event.neutral { width: 100%; margin-left: 0; border-color: #84909e; }

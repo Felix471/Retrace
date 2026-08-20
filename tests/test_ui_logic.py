@@ -36,7 +36,7 @@ process.stdout.write(JSON.stringify(logic[request.function](...request.arguments
             LOGIC.as_uri(),
         ],
         input=json.dumps({"function": function, "arguments": arguments}),
-        text=True,
+        encoding="utf-8",
         capture_output=True,
         check=True,
     )
@@ -83,3 +83,43 @@ def test_badge_classes() -> None:
     for value in ("message", "tool_call", "tool_result", "system", "other"):
         assert _call("badgeClassFor", value) == value
     assert _call("badgeClassFor", "custom") == "other"
+
+
+def test_hash_state_round_trip_and_missing_fields() -> None:
+    state = {"runId": "run / one", "agent": "A&B", "phase": "round 1", "type": "tool", "q": "caf\u00e9 & tea"}
+    encoded = _call("serializeHashState", state)
+    assert _call("parseHashState", encoded) == state
+    assert _call("parseHashState", "#/run/simple") == {
+        "runId": "simple", "agent": None, "phase": None, "type": None, "q": None,
+    }
+    assert _call("parseHashState", "#elsewhere") == {
+        "runId": None, "agent": None, "phase": None, "type": None, "q": None,
+    }
+
+
+@pytest.mark.parametrize("field", ["content", "agent_id", "role", "phase"])
+def test_matches_search_across_fields(field: str) -> None:
+    event = {"content": "", "agent_id": None, "role": None, "phase": None, field: "MiXeD value"}
+    assert _call("matchesSearch", event, "mixed") is True
+    assert _call("matchesSearch", event, "absent") is False
+    assert _call("matchesSearch", event, "") is True
+
+
+@pytest.mark.parametrize(
+    ("text", "query", "expected_matches"),
+    [
+        ("nothing", "xyz", []),
+        ("one ONE two", "one", ["one", "ONE"]),
+        ("aaaa", "aa", ["aa", "aa"]),
+        ("cat middle cat", "cat", ["cat", "cat"]),
+        ("MixEd", "mixed", ["MixEd"]),
+    ],
+)
+def test_highlight_segments(text: str, query: str, expected_matches: list[str]) -> None:
+    segments = _call("highlightSegments", text, query)
+    assert "".join(segment["text"] for segment in segments) == text
+    assert [segment["text"] for segment in segments if segment["match"]] == expected_matches
+
+
+def test_highlight_segments_empty_query() -> None:
+    assert _call("highlightSegments", "Text", "") == [{"text": "Text", "match": False}]
