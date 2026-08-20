@@ -1,0 +1,17 @@
+{
+  "retrace_tags": 1,
+  "run_id": "support-demo-25",
+  "run_note": "Pre-tagged synthetic example.",
+  "tags": [
+    {
+      "confidence": 0.8,
+      "created_at": "2026-02-17T12:00:00Z",
+      "event_ids": [
+        "support-demo-25:0"
+      ],
+      "mode": "3.1",
+      "note": "Demonstration tag for the walkthrough.",
+      "source": "demo-builder"
+    }
+  ]
+}
