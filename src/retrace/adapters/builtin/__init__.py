@@ -1,0 +1,1 @@
+"""Packaged declarative mapping configurations."""

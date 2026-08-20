@@ -877,3 +877,35 @@ def test_invalid_extension_cases_have_actionable_one_line_errors(
         load_mapping_config(path)
 
     assert str(file_error.value) == f"{path}: {parsed_message}"
+
+
+def test_sniff_required_fields_are_validated() -> None:
+    config = validate_mapping_config({
+        **_minimal_config(),
+        "sniff": {"required_fields": ["run_id", "events"]},
+    })
+
+    assert config.sniff is not None
+    assert config.sniff.required_fields == ["run_id", "events"]
+
+
+@pytest.mark.parametrize(
+    ("sniff", "location", "reason"),
+    [
+        ({"required_fields": []}, "sniff.required_fields", "at least one field"),
+        (
+            {"required_fields": ["run_id"], "unexpected": True},
+            "sniff.unexpected",
+            "unknown key",
+        ),
+    ],
+)
+def test_invalid_sniff_blocks_have_one_line_errors(
+    sniff: dict[str, object], location: str, reason: str
+) -> None:
+    with pytest.raises(MappingConfigError) as error:
+        validate_mapping_config({**_minimal_config(), "sniff": sniff})
+
+    assert str(error.value).startswith(f"{location}: ")
+    assert reason in str(error.value)
+    assert "\n" not in str(error.value)

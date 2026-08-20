@@ -61,6 +61,7 @@ __all__ = [
     "RunConfig",
     "RunDiscoveryConfig",
     "ScalarValue",
+    "SniffConfig",
     "load_mapping_config",
     "validate_mapping_config",
 ]
@@ -344,6 +345,22 @@ class AgentsConfig(_StrictConfigModel):
         return value
 
 
+class SniffConfig(_StrictConfigModel):
+    """Data-only signature used to identify a mapping from one record."""
+
+    required_fields: list[str]
+
+    @field_validator("required_fields", mode="before")
+    @classmethod
+    def _validate_required_fields(cls, value: object) -> object:
+        if isinstance(value, list) and not value:
+            raise PydanticCustomError(
+                "empty_sniff_required_fields",
+                "must contain at least one field",
+            )
+        return value
+
+
 class MappingConfig(_StrictConfigModel):
     """Top-level declarative mapping configuration."""
 
@@ -352,6 +369,7 @@ class MappingConfig(_StrictConfigModel):
     run: RunConfig
     event: EventConfig
     agents: AgentsConfig | None = None
+    sniff: SniffConfig | None = None
 
     @field_validator("retrace_mapping", mode="before")
     @classmethod

@@ -1,0 +1,65 @@
+retrace_mapping: 1
+run_discovery:
+  pattern: games.jsonl
+  unit: line
+run:
+  id: gameId
+  metadata:
+    winReason: winReason
+    config: config
+  outcome: winner
+event:
+  sources:
+    - name: discussions
+      path: discussions
+      type: message
+      priority: 0
+      fields:
+        turn: round
+        agent_id: speakerId
+        content: content
+        timestamp: timestamp
+        metadata: rest
+    - name: team_proposals
+      path: teamProposals
+      type: other
+      phase: proposal
+      priority: 1
+      fields:
+        turn: questRound
+        agent_id: proposedBy
+        metadata: rest
+    - name: quests
+      path: quests
+      type: other
+      phase: quest
+      priority: 2
+      fields:
+        turn: round
+        agent_id: proposedBy
+        metadata: rest
+      repairs:
+        - field: turn
+          strategy: ordinal
+          base: 1
+        - field: result
+          strategy: derive
+          expr: contains(values(actions), 'fail')
+          map:
+            true: fail
+            false: success
+  merge:
+    sort_by: turn
+agents:
+  path: players
+  key: id
+  attributes:
+    role: role
+    model: model
+    provider: provider
+sniff:
+  required_fields:
+    - gameId
+    - players
+    - quests
+    - discussions
