@@ -1,6 +1,6 @@
 import { Component, h, render } from "/ui/vendor/preact.module.js";
 import htm from "/ui/vendor/htm.module.js";
-import { cycleSort, distributionBars, formatCell, groupByCategory, groupByTurn, groupValueOf, highlightSegments, laneFor, matchesSearch, outcomeBarSegments, parseHashState, parseTableHashState, previewOf, resolveAnchors, serializeHashState, serializeTableHashState, tagListWith, tagListWithout, toggleColumn, toggleSelection } from "/ui/logic.js";
+import { compareStateParse, compareStateSerialize, cycleSort, distributionBars, formatCell, groupByCategory, groupByTurn, groupValueOf, gutterMarkFor, highlightSegments, laneFor, matchesSearch, outcomeBarSegments, pagesNeededFor, parseHashState, parseTableHashState, previewOf, resolveAnchors, selectionToCompareState, serializeHashState, serializeTableHashState, tagListWith, tagListWithout, toggleColumn, toggleSelection } from "/ui/logic.js";
 
 const html = htm.bind(h);
 const PAGE_SIZE = 500;
@@ -61,12 +61,12 @@ function Highlighted({ text, query }) {
 
 class EventRow extends Component {
   state = { open: false };
-  render({ event, agentIds, query, selected, onSelect, markers }, { open }) {
+  render({ event, agentIds = [], query = "", selected = false, onSelect = null, markers = [] }, { open }) {
   const lane = laneFor(event.agent_id, agentIds);
   const repaired = event.repaired.length > 0;
   const style = lane === null ? {} : { "--lane": lane, "--lanes": Math.max(agentIds.length, lane + 1) };
   return html`<article id=${`event-${event.ordinal}`} class=${`event ${lane === null ? "neutral" : `color-${lane % 8}`}`} style=${style}>
-    <label class="event-select" title="Select event for tag anchor"><input type="checkbox" checked=${selected} onChange=${() => onSelect(event.id)} /> select</label>
+    ${onSelect && html`<label class="event-select" title="Select event for tag anchor"><input type="checkbox" checked=${selected} onChange=${() => onSelect(event.id)} /> select</label>`}
     <button class="event-summary" onClick=${() => this.setState({ open: !open })} aria-expanded=${open}>
       <span class="agent">${event.agent_id ?? "system"}</span>
       ${event.role && html`<span class="role">${event.role}</span>`}
@@ -81,6 +81,72 @@ class EventRow extends Component {
       <${Metadata} metadata=${event.metadata} repaired=${event.repaired} />
     </div>`}
   </article>`;
+  }
+}
+
+function RunSummary({ run }) {
+  return html`<section class="compare-summary"><h2>${run.id}</h2><span>${run.outcome ?? "No outcome"}</span><span>${run.n_events} events</span><span>${run.ingest_warnings} warnings</span></section>`;
+}
+
+class Compare extends Component {
+  state = { runs: [], pairs: [], total: 0, baseOffset: 0, summary: null, busy: false, error: "" };
+  request = 0;
+  componentDidMount() { this.loadRuns(); this.reset(); }
+  componentDidUpdate(previous) {
+    if (previous.a !== this.props.a || previous.b !== this.props.b || previous.comparator !== this.props.comparator || previous.offset !== this.props.offset) this.reset();
+  }
+  async loadRuns() {
+    try { const page = await json(`/api/runs?limit=1000`); this.setState({ runs: page.rows }); }
+    catch (reason) { this.setState({ error: String(reason) }); }
+  }
+  reset() {
+    const { a, b, offset } = this.props;
+    this.setState({ pairs: [], total: 0, baseOffset: offset || 0, summary: null, error: "" });
+    if (a && b && a !== b) this.load(offset || 0, false, true);
+  }
+  async fetchPage(offset) {
+    const params = new URLSearchParams({ a: this.props.a, b: this.props.b, comparator: this.props.comparator, offset, limit: PAGE_SIZE });
+    return json(`/api/compare?${params}`);
+  }
+  async load(offset, all = false, replace = false) {
+    const request = replace ? ++this.request : this.request;
+    this.setState({ busy: true, error: "" });
+    try {
+      let page = await this.fetchPage(offset), loaded = page.pairs, next = offset + page.pairs.length;
+      while (all && next < page.total) { const more = await this.fetchPage(next); loaded = loaded.concat(more.pairs); next += more.pairs.length; if (!more.pairs.length) break; }
+      if (request === this.request) this.setState(current => ({ summary: page, total: page.total, baseOffset: replace ? offset : current.baseOffset, pairs: replace ? loaded : current.pairs.concat(loaded), busy: false }));
+    } catch (reason) { if (request === this.request) this.setState({ busy: false, error: String(reason).replace(/^Error: 404.*/, "Run not found. Choose two available runs.") }); }
+  }
+  async jumpTo(index) {
+    if (!this.state.pairs[index - this.state.baseOffset]) {
+      const loadedPages = [];
+      for (let offset = 0; offset <= index; offset += PAGE_SIZE) {
+        const pageEnd = Math.min(offset + PAGE_SIZE, this.state.total);
+        if (this.state.baseOffset <= offset && this.state.baseOffset + this.state.pairs.length >= pageEnd) loadedPages.push(offset);
+      }
+      const offsets = pagesNeededFor(index, PAGE_SIZE, loadedPages);
+      const byIndex = new Map(this.state.pairs.map((pair, local) => [this.state.baseOffset + local, pair]));
+      let summary = this.state.summary;
+      this.setState({ busy: true });
+      try { for (const offset of offsets) { summary = await this.fetchPage(offset); summary.pairs.forEach((pair, local) => byIndex.set(offset + local, pair)); } const pairs = Array.from({ length: index + 1 }, (_, pairIndex) => byIndex.get(pairIndex)); this.setState({ pairs, baseOffset: 0, total: summary.total, summary, busy: false }); }
+      catch (reason) { this.setState({ busy: false, error: String(reason) }); return; }
+    }
+    requestAnimationFrame(() => requestAnimationFrame(() => { const row = document.getElementById(`pair-${index}`); if (row) { row.scrollIntoView({ behavior: "smooth", block: "center" }); row.classList.add("pair-highlight"); setTimeout(() => row.classList.remove("pair-highlight"), 1400); } }));
+  }
+  render({ a, b, comparator, onState, backHash }, { runs, pairs, total, baseOffset, summary, busy, error }) {
+    const pick = (side, value) => html`<label>Run ${side}<select value=${value || ""} onChange=${event => onState({ [side]: event.target.value || null, offset: 0 })}><option value="">Choose run</option>${runs.map(run => html`<option value=${run.id}>${run.id}</option>`)}</select></label>`;
+    if (a && b && a === b) return html`<section class="compare"><a class="back" href=${backHash}>Back to runs</a><div class="compare-pickers">${pick("a", a)}${pick("b", b)}</div><p class="empty">Choose two different runs to compare.</p></section>`;
+    const first = summary?.first_divergence;
+    return html`<section class="compare"><a class="back" href=${backHash}>Back to runs</a><div class="compare-pickers">${pick("a", a)}${pick("b", b)}<label>Comparator<select value=${comparator} onChange=${event => onState({ comparator: event.target.value, offset: 0 })}><option value="normalized">normalized</option><option value="exact">exact</option></select></label></div>
+      ${error && html`<p class="error">${error}</p>`}${summary && html`<header><${RunSummary} run=${summary.run_a} /><${RunSummary} run=${summary.run_b} /></header>
+      <div class="banner divergence">${first ? `first divergence: ${first.kind} at pair ${first.index}` : "runs are identical"}${first && html`<button onClick=${() => this.jumpTo(first.index)}>Jump</button>`}</div>
+      <div class="pair-list">${pairs.map((pair, local) => { const index = baseOffset + local; const divergent = pair.status !== "match"; return html`<div id=${`pair-${index}`} class=${`pair-row status-${pair.status}`}>
+        <div class="event-cell">${pair.event_a ? html`<${EventRow} event=${pair.event_a} agentIds=${summary.run_a.agent_ids} />` : html`<div class="event-placeholder" aria-label="No event in run a"></div>`}</div>
+        <button class=${`alignment-gutter ${gutterMarkFor(pair.status)}`} title=${`${pair.status} at pair ${index}`} onClick=${divergent ? () => this.jumpTo(index) : null}>${pair.status === "match" ? "=" : pair.status === "content-diff" ? "!" : "-"}</button>
+        <div class="event-cell">${pair.event_b ? html`<${EventRow} event=${pair.event_b} agentIds=${summary.run_b.agent_ids} />` : html`<div class="event-placeholder" aria-label="No event in run b"></div>`}</div>
+      </div>`; })}</div><footer class="paging"><span>${pairs.length} of ${total} pairs loaded</span>${baseOffset + pairs.length < total && html`<button disabled=${busy} onClick=${() => this.load(baseOffset + pairs.length)}>Load more</button>`}${baseOffset + pairs.length < total && html`<button disabled=${busy} onClick=${() => this.load(baseOffset + pairs.length, true)}>Load all</button>`}</footer>`}
+      ${!summary && !error && html`<p>${a && b ? "Loading comparison..." : "Choose two runs to compare."}</p>`}
+    </section>`;
   }
 }
 
@@ -211,7 +277,7 @@ class Replay extends Component {
 }
 
 class BatchTable extends Component {
-  state = { experiment: null, rows: [], groups: [], total: 0, outcomes: [], distribution: null, vocabulary: [], busy: false, error: "", draftKey: "", draftValue: "" };
+  state = { experiment: null, rows: [], groups: [], total: 0, outcomes: [], distribution: null, vocabulary: [], busy: false, error: "", draftKey: "", draftValue: "", selectedRunIds: [] };
   request = 0;
   componentDidMount() {
     this.setState({ draftKey: this.props.view.metadataKey || "", draftValue: this.props.view.metadataValue || "" });
@@ -250,7 +316,7 @@ class BatchTable extends Component {
       if (request === this.request) this.setState({ busy: false, error: String(reason) });
     }
   }
-  render({ view, onState, onOpen }, { experiment, rows, groups, total, outcomes, distribution, vocabulary, busy, error, draftKey, draftValue }) {
+  render({ view, onState, onOpen, onCompare }, { experiment, rows, groups, total, outcomes, distribution, vocabulary, busy, error, draftKey, draftValue, selectedRunIds }) {
     const keys = experiment?.metadata_keys || [];
     const end = Math.min(view.offset + rows.length, total);
     return html`<section class="batch"><header><h1>Runs</h1><span>${experiment ? `${experiment.run_count} runs` : "Loading..."}</span></header>
@@ -266,15 +332,16 @@ class BatchTable extends Component {
         </form>
         <button onClick=${() => { this.setState({ draftKey: "", draftValue: "" }); onState({ outcome: null, metadataKey: null, metadataValue: null, offset: 0 }); }}>Clear filters</button>
         <details><summary>Columns</summary>${keys.map(key => html`<label><input type="checkbox" checked=${view.columns.includes(key)} onChange=${() => onState({ columns: toggleColumn(view.columns, key), offset: 0 })} />${key}</label>`)}</details>
+        ${selectionToCompareState(selectedRunIds) && html`<button class="compare-button" onClick=${() => onCompare(selectedRunIds)}>Compare</button>`}
       </div>
       ${error && html`<p class="error">${error}</p>`}
-      <div class="table-wrap"><table class="run-table"><thead><tr>
+      <div class="table-wrap"><table class="run-table"><thead><tr><th>Select</th>
         ${SUMMARY_COLUMNS.map(([field, label]) => html`<th><button class="sort" onClick=${() => onState({ ...cycleSort(view, field), offset: 0 })}>${label}${view.sort === field ? (view.order === "asc" ? " ^" : " v") : ""}</button></th>`)}
         ${view.columns.map(key => html`<th>${key}</th>`)}</tr></thead><tbody>
         ${(view.groupBy ? groups.flatMap(group => {
           const groupRows = rows.filter(row => String(groupValueOf(row, view.groupBy)) === String(group.group_value));
           const segments = outcomeBarSegments(group.outcome_distribution, 240);
-          const header = html`<tr class="group-header"><th colSpan=${SUMMARY_COLUMNS.length + view.columns.length}>
+          const header = html`<tr class="group-header"><th colSpan=${SUMMARY_COLUMNS.length + view.columns.length + 1}>
             <div class="group-title">${group.group_value ?? "(missing)"}</div>
             <div class="aggregate-strip">
               <span>${group.run_count} runs</span><span>turns mean ${formatCell(group.mean_turns, "mean_turns")}, median ${formatCell(group.median_turns, "median_turns")}</span>
@@ -287,7 +354,7 @@ class BatchTable extends Component {
             </svg>
           </th></tr>`;
           return [header, ...groupRows.map(row => ({ row }))];
-        }) : rows.map(row => ({ row }))).map(item => item.row ? html`<tr key=${item.row.id} tabIndex="0" onClick=${() => onOpen(item.row.id)} onKeyDown=${event => { if (event.key === "Enter") onOpen(item.row.id); }}>
+        }) : rows.map(row => ({ row }))).map(item => item.row ? html`<tr key=${item.row.id} tabIndex="0" onClick=${() => onOpen(item.row.id)} onKeyDown=${event => { if (event.key === "Enter") onOpen(item.row.id); }}><td><input aria-label=${`Select ${item.row.id}`} type="checkbox" checked=${selectedRunIds.includes(item.row.id)} onClick=${event => event.stopPropagation()} onChange=${() => this.setState({ selectedRunIds: toggleSelection(selectedRunIds, item.row.id) })} /></td>
           ${SUMMARY_COLUMNS.map(([field]) => html`<td>${formatCell(item.row[field], field)}</td>`)}
           ${view.columns.map(key => html`<td>${formatCell(item.row.metadata[key], key)}</td>`)}</tr>` : item)}
       </tbody></table></div>
@@ -320,16 +387,19 @@ class BatchTable extends Component {
 }
 
 class App extends Component {
-  state = { route: location.hash.startsWith("#/run/") ? "run" : "table", view: location.hash.startsWith("#/run/") ? parseHashState(location.hash) : parseTableHashState(location.hash), backHash: "#/" };
-  changed = () => this.setState({ route: location.hash.startsWith("#/run/") ? "run" : "table", view: location.hash.startsWith("#/run/") ? parseHashState(location.hash) : parseTableHashState(location.hash) });
-  updateView = changes => { location.hash = this.state.route === "run" ? serializeHashState({ ...this.state.view, ...changes }) : serializeTableHashState({ ...this.state.view, ...changes }); };
+  routeFor = hash => hash.startsWith("#/run/") ? "run" : hash.startsWith("#/compare") ? "compare" : "table";
+  viewFor = hash => this.routeFor(hash) === "run" ? parseHashState(hash) : this.routeFor(hash) === "compare" ? compareStateParse(hash) : parseTableHashState(hash);
+  state = { route: this.routeFor(location.hash), view: this.viewFor(location.hash), backHash: "#/" };
+  changed = () => this.setState({ route: this.routeFor(location.hash), view: this.viewFor(location.hash) });
+  updateView = changes => { location.hash = this.state.route === "run" ? serializeHashState({ ...this.state.view, ...changes }) : this.state.route === "compare" ? compareStateSerialize({ ...this.state.view, ...changes }) : serializeTableHashState({ ...this.state.view, ...changes }); };
   openRun = runId => { const backHash = serializeTableHashState(this.state.view); this.setState({ backHash }); location.hash = serializeHashState({ runId }); };
+  openCompare = selected => { const state = selectionToCompareState(selected); if (state) { const backHash = serializeTableHashState(this.state.view); this.setState({ backHash }); location.hash = compareStateSerialize(state); } };
   componentDidMount() {
     addEventListener("hashchange", this.changed);
   }
   componentWillUnmount() { removeEventListener("hashchange", this.changed); }
   render(_, { route, view, backHash }) {
-  return html`<main>${route === "run" ? html`<${Replay} ...${view} backHash=${backHash} onState=${this.updateView} />` : html`<${BatchTable} view=${view} onState=${this.updateView} onOpen=${this.openRun} />`}</main>`;
+  return html`<main>${route === "run" ? html`<${Replay} ...${view} backHash=${backHash} onState=${this.updateView} />` : route === "compare" ? html`<${Compare} ...${view} backHash=${backHash} onState=${this.updateView} />` : html`<${BatchTable} view=${view} onState=${this.updateView} onOpen=${this.openRun} onCompare=${this.openCompare} />`}</main>`;
   }
 }
 

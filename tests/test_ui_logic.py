@@ -96,6 +96,43 @@ def test_hash_state_round_trip_and_missing_fields() -> None:
     assert _call("parseHashState", "#/run/simple") == {
         "runId": "simple", "agent": None, "phase": None, "type": None, "q": None,
     }
+
+
+def test_compare_state_round_trip_and_defaults() -> None:
+    state = {"a": "run / a", "b": "run&b", "comparator": "exact", "offset": 1500}
+    encoded = _call("compareStateSerialize", state)
+    assert _call("compareStateParse", encoded) == state
+    assert _call("compareStateParse", "#/compare?a=one&b=two") == {
+        "a": "one", "b": "two", "comparator": "normalized", "offset": 0,
+    }
+
+
+def test_compare_viewport_page_mapping() -> None:
+    assert _call("pagesNeededFor", 10, 500, []) == [0]
+    assert _call("pagesNeededFor", 1700, 500, [0, 500]) == [1000, 1500]
+    assert _call("pagesNeededFor", 10, 500, [0]) == []
+
+
+@pytest.mark.parametrize(
+    ("status", "mark"),
+    [
+        ("match", "gutter-match"),
+        ("content-diff", "gutter-content-diff"),
+        ("only-a", "gutter-only-a"),
+        ("only-b", "gutter-only-b"),
+        ("surprise", "gutter-unknown"),
+    ],
+)
+def test_compare_gutter_marks(status: str, mark: str) -> None:
+    assert _call("gutterMarkFor", status) == mark
+
+
+@pytest.mark.parametrize(
+    ("selected", "expected"),
+    [([], None), (["a"], None), (["a", "b"], {"a": "a", "b": "b"}), (["a", "b", "c"], None)],
+)
+def test_selection_to_compare_state(selected: list[str], expected: dict[str, str] | None) -> None:
+    assert _call("selectionToCompareState", selected) == expected
     assert _call("parseHashState", "#elsewhere") == {
         "runId": None, "agent": None, "phase": None, "type": None, "q": None,
     }

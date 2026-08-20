@@ -99,6 +99,44 @@ export function serializeHashState(state) {
   return `#/run/${encodeURIComponent(String(state.runId))}${query ? `?${query}` : ""}`;
 }
 
+export function compareStateParse(hash) {
+  const match = String(hash ?? "").match(/^#\/compare(?:\?(.*))?$/);
+  const params = new URLSearchParams(match?.[1] || "");
+  const offset = Number.parseInt(params.get("offset") || "0", 10);
+  return {
+    a: match ? present(params, "a") : null,
+    b: match ? present(params, "b") : null,
+    comparator: match ? (present(params, "comparator") || "normalized") : "normalized",
+    offset: Number.isInteger(offset) && offset >= 0 ? offset : 0,
+  };
+}
+
+export function compareStateSerialize(state) {
+  const params = new URLSearchParams();
+  for (const key of ["a", "b"]) if (state?.[key]) params.set(key, String(state[key]));
+  if (state?.comparator && state.comparator !== "normalized") params.set("comparator", String(state.comparator));
+  const offset = Number(state?.offset);
+  if (Number.isInteger(offset) && offset > 0) params.set("offset", String(offset));
+  const query = params.toString();
+  return `#/compare${query ? `?${query}` : ""}`;
+}
+
+export function pagesNeededFor(pairIndex, pageSize, loadedPages) {
+  const target = Math.floor(Number(pairIndex) / Number(pageSize));
+  if (!Number.isInteger(target) || target < 0 || !(Number(pageSize) > 0)) return [];
+  const loaded = new Set(loadedPages || []);
+  return Array.from({ length: target + 1 }, (_, index) => index * Number(pageSize))
+    .filter(offset => !loaded.has(offset));
+}
+
+export function gutterMarkFor(status) {
+  return ({ match: "gutter-match", "content-diff": "gutter-content-diff", "only-a": "gutter-only-a", "only-b": "gutter-only-b" })[status] || "gutter-unknown";
+}
+
+export function selectionToCompareState(selectedRunIds) {
+  return selectedRunIds?.length === 2 ? { a: selectedRunIds[0], b: selectedRunIds[1] } : null;
+}
+
 const TABLE_DEFAULTS = {
   sort: "id", order: "asc", outcome: null, metadataKey: null,
   metadataValue: null, groupBy: null, columns: [], offset: 0,

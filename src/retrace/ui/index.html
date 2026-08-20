@@ -51,6 +51,15 @@
     .tag-form { display: grid; gap: .6rem; max-width: 42rem; padding-top: .7rem; border-top: 1px solid #d8dee6; }
     .tag-form label:not(.anchor-toggle) { display: grid; gap: .2rem; } .tag-form select, .tag-form textarea { padding: .35rem; } .tag-form textarea { min-height: 4rem; resize: vertical; }
     .empty { max-width: 32rem; margin: 15vh auto; text-align: center; color: #647184; }
+    .compare-pickers, .compare > header { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
+    .compare-pickers { grid-template-columns: 1fr 1fr auto; padding: .75rem; background: white; } .compare-pickers label { display: grid; gap: .2rem; }
+    .compare-summary { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: baseline; background: white; padding: .75rem; } .compare-summary h2 { width: 100%; margin: 0; }
+    .divergence { display: flex; justify-content: space-between; align-items: center; background: #e7edf5; }
+    .pair-row { display: grid; grid-template-columns: minmax(0, 1fr) 3rem minmax(0, 1fr); gap: .5rem; margin-bottom: .65rem; transition: background .25s, box-shadow .25s; }
+    .pair-row .event { width: 100%; margin-left: 0; height: max-content; } .event-placeholder { height: 100%; min-height: 3.2rem; border: 1px dashed #aeb8c4; background: #e9edf1; }
+    .alignment-gutter { align-self: stretch; border: 0; font-weight: 800; font-size: 1.1rem; } .gutter-match { background: #dfe5eb; color: #526071; cursor: default; }
+    .gutter-content-diff { background: #ffe08a; color: #684c00; } .gutter-only-a, .gutter-only-b { background: #f3c5cc; color: #7e1425; } .gutter-unknown { background: #dfe5eb; }
+    .pair-highlight { background: #fff6bd; box-shadow: 0 0 0 3px #e2b714; }
     @media (max-width: 700px) { main { padding: .75rem; } .event { width: 100%; margin-left: 0; } .tag-bar-row { grid-template-columns: 1fr; gap: .15rem; margin-bottom: .75rem; } }
   </style>
 </head>
