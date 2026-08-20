@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from retrace.core.aggregate import aggregate_runs
+from retrace.core.mast import FAILURE_MODE_CATEGORIES
 from retrace.core.model import VALID_EVENT_TYPES, Event
 from retrace.core.store import SqliteStore
 
@@ -135,6 +136,28 @@ class EventsResponse(BaseModel):
     limit: int = Field(description="Applied page size, capped at 2000.")
 
 
+class FailureModeResponse(BaseModel):
+    """One mode in the fixed MAST failure vocabulary."""
+
+    id: str
+    name: str
+    category: str
+    description: str
+
+
+class FailureModeCategoryResponse(BaseModel):
+    """An ordered MAST category and its ordered failure modes."""
+
+    category: str
+    modes: list[FailureModeResponse]
+
+
+class TagVocabularyResponse(BaseModel):
+    """The ordered categories in the fixed MAST vocabulary."""
+
+    categories: list[FailureModeCategoryResponse]
+
+
 def _event_payload(event: Event) -> dict[str, Any]:
     data = event.to_dict()
     event_type = data["type"]
@@ -187,6 +210,21 @@ def create_app(db_path: Path) -> FastAPI:
             "total_ingest_warnings": total_ingest_warnings,
             "metadata_keys": metadata_keys,
         }
+
+    @app.get("/api/tags/vocabulary", response_model=TagVocabularyResponse)
+    async def tag_vocabulary() -> TagVocabularyResponse:
+        return TagVocabularyResponse(
+            categories=[
+                FailureModeCategoryResponse(
+                    category=category,
+                    modes=[
+                        FailureModeResponse.model_validate(mode, from_attributes=True)
+                        for mode in modes
+                    ],
+                )
+                for category, modes in FAILURE_MODE_CATEGORIES
+            ]
+        )
 
     @app.get("/api/runs", response_model=RunsResponse)
     async def runs(
@@ -295,9 +333,12 @@ def create_app(db_path: Path) -> FastAPI:
 __all__ = [
     "EventResponse",
     "EventsResponse",
+    "FailureModeCategoryResponse",
+    "FailureModeResponse",
     "RunGroupResponse",
     "RunListItem",
     "RunResponse",
     "RunsResponse",
+    "TagVocabularyResponse",
     "create_app",
 ]
