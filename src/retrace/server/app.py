@@ -336,6 +336,7 @@ def create_app(db_path: Path) -> FastAPI:
             "experiment_id": store.meta_get("experiment_id"),
             "root_path": store.meta_get("root_path"),
             "adapter_ref": store.meta_get("adapter_ref"),
+            "adapter_config_hash": store.meta_get("adapter_config_hash"),
             "run_count": run_count,
             "total_events": total_events,
             "total_ingest_warnings": total_ingest_warnings,

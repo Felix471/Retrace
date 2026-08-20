@@ -9,7 +9,7 @@ import pytest
 
 from retrace.adapters.registry import resolve_config
 from retrace.cli.main import _pick_free_port, _resolve_bind_host
-from retrace.core.ingest import ingest, stable_root_hash
+from retrace.core.ingest import _config_hash, ingest, stable_root_hash
 from retrace.core.store import SqliteStore
 from retrace.server.app import create_app
 
@@ -22,8 +22,7 @@ def _database(tmp_path: Path, fixture: str) -> tuple[Path, str]:
     path = tmp_path / f"{fixture}.db"
     config, adapter_ref = resolve_config(root)
     with SqliteStore(path) as store:
-        ingest(config, root, store)
-        store.meta_set("adapter_ref", adapter_ref)
+        ingest(config, root, store, adapter_ref=adapter_ref)
     return path, adapter_ref
 
 
@@ -64,6 +63,7 @@ def test_experiment_api(
         "experiment_id": stable_root_hash(FIXTURES / fixture),
         "root_path": (FIXTURES / fixture).resolve().as_posix(),
         "adapter_ref": adapter_ref,
+        "adapter_config_hash": _config_hash(resolve_config(FIXTURES / fixture)[0]),
         "run_count": runs,
         "total_events": events,
         "total_ingest_warnings": warnings,

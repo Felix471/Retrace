@@ -113,7 +113,7 @@ def _resolve(args: argparse.Namespace) -> tuple[object, str]:
 def _check(args: argparse.Namespace) -> int:
     config, adapter_ref = _resolve(args)
     with SqliteStore(":memory:") as store:
-        report = ingest(config, Path(args.path), store)
+        report = ingest(config, Path(args.path), store, adapter_ref=adapter_ref)
         runs = store.list_runs()
         _print_report(adapter_ref, report, store.experiment_summary(), runs)
     return 0
@@ -130,8 +130,14 @@ def _view(args: argparse.Namespace) -> int:
         print(f"\rIngesting runs: {current}/{total}", end="", flush=True)
 
     with SqliteStore(store_path) as store:
-        report = ingest(config, root, store, reingest=args.reingest, progress=progress)
-        store.meta_set("adapter_ref", adapter_ref)
+        report = ingest(
+            config,
+            root,
+            store,
+            adapter_ref=adapter_ref,
+            reingest=args.reingest,
+            progress=progress,
+        )
         stored_summary = store.experiment_summary()
         summary = (
             stored_summary[0],

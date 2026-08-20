@@ -8,7 +8,10 @@ from unittest.mock import patch
 
 import pytest
 
+from retrace.adapters.registry import resolve_config
 from retrace.cli.main import _hit_rate, main
+from retrace.core.ingest import _config_hash
+from retrace.core.store import SqliteStore
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = REPO_ROOT / "fixtures"
@@ -97,6 +100,10 @@ def test_view_creates_cache_and_passes_server_options(tmp_path: Path) -> None:
     assert len(databases) == 1
     mocked.assert_called_once_with(databases[0], "0.0.0.0", 9001, False)
     assert not list((FIXTURES / "avalon_mini").glob("*.db"))
+    config, adapter_ref = resolve_config(FIXTURES / "avalon_mini")
+    with SqliteStore(databases[0]) as store:
+        assert store.meta_get("adapter_ref") == adapter_ref == "builtin:avalon"
+        assert store.meta_get("adapter_config_hash") == _config_hash(config)
 
 
 def test_version() -> None:

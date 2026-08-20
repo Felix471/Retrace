@@ -114,8 +114,13 @@ def test_progress_and_config_hash_warning(tmp_path: Path) -> None:
     _tree(tmp_path)
     calls: list[tuple[str, int, int]] = []
     with SqliteStore(tmp_path / "cache.db") as store:
-        assert not ingest(_flat_config(), tmp_path, store, progress=lambda *x: calls.append(x)).config_hash_warning
+        assert not ingest(
+            _flat_config(), tmp_path, store, adapter_ref="builtin:test",
+            progress=lambda *x: calls.append(x),
+        ).config_hash_warning
         assert calls == [("case-one", 1, 1)]
+        assert store.meta_get("adapter_ref") == "builtin:test"
+        assert store.meta_get("adapter_config_hash") == store.meta_get("config_hash")
         assert ingest(_flat_config(phase="turn"), tmp_path, store).config_hash_warning
         assert not ingest(_flat_config(phase="turn"), tmp_path, store).config_hash_warning
 

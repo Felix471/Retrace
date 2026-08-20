@@ -263,6 +263,7 @@ def ingest(
     root: Path,
     store: SqliteStore,
     *,
+    adapter_ref: str | None = None,
     reingest: bool = False,
     progress: Progress | None = None,
 ) -> IngestReport:
@@ -327,7 +328,9 @@ def ingest(
             stat = file_path.stat()
             store.set_fingerprint(source_path, stat.st_mtime, stat.st_size)
 
-        store.meta_set("adapter_ref", digest)
+        if adapter_ref is not None:
+            store.meta_set("adapter_ref", adapter_ref)
+        store.meta_set("adapter_config_hash", digest)
         store.meta_set("config_hash", digest)
         store.meta_set("experiment_id", experiment_id)
         store.meta_set("root_path", _source_path(root))
@@ -366,7 +369,9 @@ def ingest(
         stat = Path(path).stat()
         store.set_fingerprint(path, stat.st_mtime, stat.st_size)
 
-    store.meta_set("adapter_ref", digest)
+    if adapter_ref is not None:
+        store.meta_set("adapter_ref", adapter_ref)
+    store.meta_set("adapter_config_hash", digest)
     store.meta_set("config_hash", digest)
     store.meta_set("experiment_id", experiment_id)
     store.meta_set("root_path", _source_path(root))
