@@ -6,9 +6,19 @@ build-backend = "setuptools.build_meta"
 name = "retrace-logs"
 version = "0.1.0"
 description = "Inspect and replay structured multi-agent logs."
+readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
+keywords = ["logs", "replay", "visualization", "multi-agent"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Framework :: FastAPI",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
 dependencies = [
     "fastapi",
     "uvicorn",
@@ -22,6 +32,7 @@ dev = [
     "pytest",
     "httpx",
     "ruff",
+    "build",
 ]
 
 [project.scripts]
@@ -40,6 +51,9 @@ retrace = ["adapters/builtin/*.yaml", "ui/*.html", "ui/*.js", "ui/vendor/*.js"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+markers = [
+    "slow: tests that build and install into an isolated environment",
+]
 
 [tool.ruff]
 target-version = "py311"

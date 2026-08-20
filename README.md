@@ -4,6 +4,8 @@ Retrace is a local-first viewer for inspecting, replaying, tagging, and comparin
 structured multi-agent logs. It is an offline inspection tool, not a monitoring
 service, SDK, or cloud platform.
 
+See the [changelog](CHANGELOG.md) for release notes.
+
 ## Install
 
 PyPI publication has not happened. From a checkout, install the `retrace-logs`
