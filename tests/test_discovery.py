@@ -149,10 +149,10 @@ def test_unsafe_pattern_is_rejected(tmp_path: Path, pattern: str) -> None:
     assert "\n" not in str(captured.value)
 
 
-def test_line_unit_is_not_supported(tmp_path: Path) -> None:
-    with pytest.raises(MappingConfigError) as captured:
-        discover_runs(_config("*.jsonl", unit="line"), tmp_path)
-    assert str(captured.value) == "run_discovery.unit: 'line' is not supported yet"
+def test_line_unit_discovers_json_objects(tmp_path: Path) -> None:
+    (tmp_path / "runs.jsonl").write_text('{"id":"one"}\n', encoding="utf-8")
+    runs = discover_runs(_config("*.jsonl", unit="line", run_id="id"), tmp_path)
+    assert [(run.run_id, run.line_no) for run in runs] == [("one", 1)]
 
 
 def test_discovery_is_read_only(tmp_path: Path) -> None:

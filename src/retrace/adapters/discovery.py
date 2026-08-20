@@ -4,14 +4,29 @@ from __future__ import annotations
 
 import json
 import warnings
+from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from json import JSONDecodeError
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from string import Formatter
+from typing import TypeAlias
+
+import jmespath
+from jmespath.exceptions import JMESPathError
 
 from retrace.adapters.mapping_schema import MappingConfig, MappingConfigError
 
-__all__ = ["DiscoveryError", "RunSource", "discover_runs"]
+__all__ = [
+    "DiscoveryError",
+    "DiscoveryReport",
+    "JsonlRecord",
+    "RunSource",
+    "discover_runs",
+    "discover_runs_with_report",
+    "iter_jsonl_records",
+]
+
+JsonlRecord: TypeAlias = tuple[int, dict[str, object] | str]
 
 
 class DiscoveryError(ValueError):
@@ -27,6 +42,16 @@ class RunSource:
     events_path: Path
     manifest: dict[str, object] | None
     warnings: tuple[str, ...] = ()
+    line_no: int | None = None
+
+
+@dataclass(frozen=True)
+class DiscoveryReport:
+    """Line discovery results and recoverable input failures."""
+
+    sources: list[RunSource]
+    line_failures: list[tuple[Path, int, str]]
+    per_file_failure_counts: dict[Path, int]
 
 
 @dataclass(frozen=True)
@@ -69,6 +94,8 @@ def _find_candidates(config: MappingConfig, root: Path) -> list[_Candidate]:
     discovery = config.run_discovery
     pattern = discovery.pattern
     _validate_pattern(pattern)
+    if discovery.unit == "line" and root.is_file():
+        return [_Candidate(root, root, root.name)]
     if not root.is_dir():
         raise DiscoveryError(f"{root}: no matches for pattern {pattern!r}")
 
@@ -84,7 +111,7 @@ def _find_candidates(config: MappingConfig, root: Path) -> list[_Candidate]:
                 stacklevel=3,
             )
             continue
-        if discovery.unit == "file":
+        if discovery.unit in ("file", "line"):
             if match.is_file():
                 candidates.append(
                     _Candidate(match, match, _relative_posix(match, root))
@@ -112,6 +139,29 @@ def _find_candidates(config: MappingConfig, root: Path) -> list[_Candidate]:
     if not matches:
         raise DiscoveryError(f"{root}: no matches for pattern {pattern!r}")
     return sorted(candidates, key=lambda candidate: candidate.relative_path)
+
+
+def iter_jsonl_records(path: Path) -> Iterator[JsonlRecord]:
+    """Yield each usable JSON object or a reason for a bad physical line."""
+
+    with path.open("rb") as stream:
+        for line_no, raw_line in enumerate(stream, start=1):
+            try:
+                line = raw_line.decode("utf-8-sig" if line_no == 1 else "utf-8")
+            except UnicodeDecodeError as error:
+                yield line_no, f"invalid UTF-8: {error}"
+                continue
+            if not line.strip():
+                continue
+            try:
+                value = json.loads(line)
+            except JSONDecodeError as error:
+                yield line_no, f"invalid JSON: {error.msg}"
+                continue
+            if not isinstance(value, dict):
+                yield line_no, "invalid JSON: expected an object"
+                continue
+            yield line_no, value
 
 
 def _render_run_id(template: str, candidate: _Candidate, unit: str) -> str:
@@ -182,7 +232,7 @@ def discover_runs(config: MappingConfig, root: Path) -> list[RunSource]:
 
     unit = config.run_discovery.unit
     if unit == "line":
-        raise MappingConfigError("run_discovery.unit: 'line' is not supported yet")
+        return discover_runs_with_report(config, root).sources
     candidates = _find_candidates(config, root)
     sources: list[RunSource] = []
     for candidate in candidates:
@@ -197,3 +247,60 @@ def discover_runs(config: MappingConfig, root: Path) -> list[RunSource]:
             )
         )
     return _make_ids_unique(sources)
+
+
+def discover_runs_with_report(config: MappingConfig, root: Path) -> DiscoveryReport:
+    """Discover runs, retaining recoverable per-line failures in a report."""
+
+    if config.run_discovery.unit != "line":
+        return DiscoveryReport(discover_runs(config, root), [], {})
+
+    try:
+        id_expression = jmespath.compile(config.run.id)
+    except JMESPathError as error:
+        raise MappingConfigError(f"run.id: invalid JMESPath expression: {error}") from error
+
+    candidates = _find_candidates(config, root)
+    sources: list[RunSource] = []
+    failures: list[tuple[Path, int, str]] = []
+    failure_counts: dict[Path, int] = {}
+    used_ids: set[str] = set()
+    for candidate in candidates:
+        failure_counts[candidate.events_path] = 0
+        for line_no, item in iter_jsonl_records(candidate.events_path):
+            if isinstance(item, str):
+                failures.append((candidate.events_path, line_no, item))
+                failure_counts[candidate.events_path] += 1
+                continue
+
+            value = id_expression.search(item)
+            fallback_reason: str | None = None
+            if value is None or isinstance(value, (dict, list)):
+                fallback_reason = "run id is null or non-scalar"
+            else:
+                run_id = str(value)
+                if run_id in used_ids:
+                    fallback_reason = f"duplicate run id {run_id!r}"
+
+            source_warnings: tuple[str, ...] = ()
+            if fallback_reason is not None:
+                run_id = f"{candidate.events_path.stem}#L{line_no}"
+                source_warnings = (
+                    _warning(
+                        candidate.events_path,
+                        f"{fallback_reason}; using fallback id {run_id!r}",
+                    ),
+                )
+            used_ids.add(run_id)
+            sources.append(
+                RunSource(
+                    run_id=run_id,
+                    root=candidate.events_path,
+                    events_path=candidate.events_path,
+                    manifest=None,
+                    warnings=source_warnings,
+                    line_no=line_no,
+                )
+            )
+
+    return DiscoveryReport(_make_ids_unique(sources), failures, failure_counts)
