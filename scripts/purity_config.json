@@ -1,0 +1,24 @@
+{
+  "banned_identifiers": [
+    "avalon",
+    "merlin",
+    "percival",
+    "morgana",
+    "mordred",
+    "oberon",
+    "assassin",
+    "minion",
+    "loyal servant",
+    "quest"
+  ],
+  "boundary_rule": "Case-insensitive; match when preceded by start-of-line or a non-letter. A trailing identifier suffix is allowed.",
+  "scan_paths": ["src", "scripts", "tests", ".github", "pyproject.toml"],
+  "exact_allowlist": ["src/retrace/adapters/builtin/avalon.yaml"],
+  "tree_allowlist": ["fixtures/avalon_mini/"],
+  "test_markers": ["avalon_mini", "avalon_sample", "builtin:avalon"],
+  "field_manifest": "fixtures/field_names.json",
+  "ui_path": "src/retrace/ui",
+  "ui_field_name_exclusions": ["body", "content", "type", "id", "name"],
+  "ui_field_name_exclusions_description": "HTML, JavaScript, and platform vocabulary that is not evidence of fixture coupling.",
+  "config_control_file": "scripts/purity_config.json"
+}

@@ -1,0 +1,37 @@
+{
+  "avalon_mini.records": [
+    "assassination",
+    "config",
+    "discussions",
+    "durationMs",
+    "fallbackCounts",
+    "gameId",
+    "llmCallCount",
+    "players",
+    "quests",
+    "teamProposals",
+    "timestamp",
+    "winReason",
+    "winner"
+  ],
+  "support_pipeline.manifest": [
+    "issue_area",
+    "model_name",
+    "outcome",
+    "routing_variant",
+    "run_id"
+  ],
+  "support_pipeline.records": [
+    "body",
+    "cost",
+    "handler",
+    "occurred_at",
+    "record_id",
+    "sequence",
+    "step_kind",
+    "ticket_id",
+    "tokens_in",
+    "tokens_out",
+    "workflow_stage"
+  ]
+}
