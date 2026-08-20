@@ -26,4 +26,4 @@ htmlcov/
 
 # IDE settings and pre-project scratch (local-only)
 .idea/
-main.py
+/main.py

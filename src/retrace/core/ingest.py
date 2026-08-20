@@ -15,9 +15,9 @@ from retrace.adapters.discovery import (
     discover_runs_with_report,
     iter_jsonl_records,
 )
-from retrace.adapters.extract import Extractor
+from retrace.adapters.extract import ExtractionStats, Extractor, FieldStats
 from retrace.adapters.mapping_schema import EventConfig, MappingConfig, MappingConfigError
-from retrace.adapters.multisource import MultiSourceEvent, MultiSourceExtractor
+from retrace.adapters.multisource import MultiSourceEvent, MultiSourceExtractor, MultiSourceStats
 from retrace.adapters.roster import RosterJoin
 from retrace.core.model import Event, Run
 from retrace.core.store import SqliteStore
@@ -37,6 +37,10 @@ class IngestReport:
     per_file_line_failures: dict[Path, int] = field(default_factory=dict)
     config_hash_warning: bool = False
     processed_run_ids: list[str] = field(default_factory=list)
+    field_stats: dict[str, FieldStats] = field(default_factory=dict)
+    repair_rule_counts: dict[tuple[str, str, str], tuple[int, int]] = field(
+        default_factory=dict
+    )
 
     @property
     def ingested(self) -> int:
@@ -63,6 +67,39 @@ def _config_hash(config: MappingConfig) -> str:
         sort_keys=True,
     )
     return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def stable_root_hash(root: Path) -> str:
+    """Return the stable identifier used for one ingested root."""
+    return hashlib.sha256(str(root.resolve()).encode()).hexdigest()[:16]
+
+
+def _merge_stats(
+    report: IngestReport,
+    stats: ExtractionStats,
+    config: MappingConfig,
+) -> None:
+    for path, counter in stats.fields.items():
+        aggregate = report.field_stats.setdefault(path, FieldStats())
+        aggregate.hits += counter.hits
+        aggregate.misses += counter.misses
+        aggregate.failures += counter.failures
+    if not isinstance(stats, MultiSourceStats):
+        return
+    sources = config.event.sources or []
+    strategies = {
+        (source.name, rule.field): rule.strategy
+        for source in sources
+        for rule in source.repairs
+    }
+    for (source, repair_field), fired in stats.repair_fire_counts.items():
+        strategy = strategies[(source, repair_field)]
+        key = (source, repair_field, strategy)
+        old_fired, old_considered = report.repair_rule_counts.get(key, (0, 0))
+        report.repair_rule_counts[key] = (
+            old_fired + fired,
+            old_considered + stats.source_record_counts[source],
+        )
 
 
 def _source_path(path: Path) -> str:
@@ -144,23 +181,29 @@ def _run_extractor(config: MappingConfig) -> Extractor:
 
 def _assemble_sources(
     config: MappingConfig, source: RunSource, record: dict[str, object], experiment_id: str
-) -> tuple[Run, list[Event]]:
+) -> tuple[Run, list[Event], ExtractionStats]:
     extractor = MultiSourceExtractor(config)
     events = [_event(source.run_id, item) for item in extractor.extract_events(record)]
     run_extractor = _run_extractor(config)
     basis = source.manifest if source.manifest is not None else record
     fields = run_extractor.extract_run_fields(basis)
+    for path, counter in run_extractor.stats.fields.items():
+        target = extractor.stats.fields.setdefault(path, FieldStats())
+        target.hits += counter.hits
+        target.misses += counter.misses
+        target.failures += counter.failures
     warnings = extractor.stats.total_warnings + run_extractor.stats.total_warnings
     return (
         _run(source, experiment_id, events, fields.metadata, fields.outcome,
              warnings, extractor.stats.n_repaired),
         events,
+        extractor.stats,
     )
 
 
 def _assemble_flat(
     config: MappingConfig, source: RunSource, experiment_id: str
-) -> tuple[Run, list[Event]]:
+) -> tuple[Run, list[Event], ExtractionStats]:
     extractor = Extractor(config)
     parsed: list[dict[str, object]] = []
     malformed = 0
@@ -188,8 +231,8 @@ def _assemble_flat(
     else:
         join_warnings = 0
     warnings = extractor.stats.total_warnings + malformed + join_warnings
-    return _run(source, experiment_id, events, run_fields.metadata, run_fields.outcome,
-                warnings, 0), events
+    return (_run(source, experiment_id, events, run_fields.metadata, run_fields.outcome,
+                 warnings, 0), events, extractor.stats)
 
 
 def _first_record(path: Path) -> dict[str, object]:
@@ -203,15 +246,15 @@ def _process(
     config: MappingConfig,
     sources: Iterable[RunSource],
     experiment_id: str,
-) -> list[tuple[RunSource, Run, list[Event]]]:
+) -> list[tuple[RunSource, Run, list[Event], ExtractionStats]]:
     result = []
     for source in sources:
         if config.event.sources is not None:
             record = _first_record(source.events_path)
-            run, events = _assemble_sources(config, source, record, experiment_id)
+            run, events, stats = _assemble_sources(config, source, record, experiment_id)
         else:
-            run, events = _assemble_flat(config, source, experiment_id)
-        result.append((source, run, events))
+            run, events, stats = _assemble_flat(config, source, experiment_id)
+        result.append((source, run, events, stats))
     return result
 
 
@@ -231,7 +274,7 @@ def ingest(
     digest = _config_hash(config)
     old_digest = store.meta_get("config_hash")
     report.config_hash_warning = old_digest is not None and old_digest != digest
-    experiment_id = hashlib.sha256(str(root.resolve()).encode()).hexdigest()[:16]
+    experiment_id = stable_root_hash(root)
     known_fingerprints = store.fingerprints()
     existing = {run.id: run for run in store.list_runs()}
 
@@ -269,7 +312,8 @@ def ingest(
                 source = by_line.get(line_no)
                 if source is None or not isinstance(item, dict):
                     continue
-                run, events = _assemble_sources(config, source, item, experiment_id)
+                run, events, stats = _assemble_sources(config, source, item, experiment_id)
+                _merge_stats(report, stats, config)
                 store.insert_run(run, events)
                 if source.run_id in old_ids:
                     report.runs_replaced += 1
@@ -307,7 +351,8 @@ def ingest(
         old_ids = {run.id for run in existing.values() if run.source_path == path}
         store.delete_runs_for_source(path)
         assembled = _process(config, file_sources, experiment_id)
-        for source, run, events in assembled:
+        for source, run, events, stats in assembled:
+            _merge_stats(report, stats, config)
             store.insert_run(run, events)
             if source.run_id in old_ids:
                 report.runs_replaced += 1
@@ -327,4 +372,4 @@ def ingest(
     return report
 
 
-__all__ = ["IngestReport", "ingest"]
+__all__ = ["IngestReport", "ingest", "stable_root_hash"]
