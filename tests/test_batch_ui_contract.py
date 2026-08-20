@@ -20,6 +20,10 @@ FIXED_FIELDS = {
     "id", "outcome", "n_events", "n_turns", "duration_s", "total_cost",
     "ingest_warnings", "n_repaired", "metadata",
 }
+GROUP_FIELDS = {
+    "group_value", "run_count", "mean_turns", "median_turns", "mean_cost",
+    "cost_excluded", "mean_duration", "duration_excluded", "outcome_distribution",
+}
 
 
 def _check(path: Path, check: Callable[[httpx.AsyncClient], Awaitable[None]]) -> None:
@@ -67,6 +71,29 @@ def test_batch_table_contract_on_both_fixtures(tmp_path: Path, fixture: str) -> 
         filtered = (await client.get("/api/runs", params={key: value, "outcome": first["outcome"]})).json()
         assert filtered["rows"]
         assert all(row["metadata"].get(key) == value and row["outcome"] == first["outcome"] for row in filtered["rows"])
+
+    _check(path, check)
+
+
+@pytest.mark.parametrize(
+    ("fixture", "group_by", "expected"),
+    [
+        ("support_pipeline", "model_name", [(5, {"resolved": 5}), (5, {"escalated": 3, "resolved": 2})]),
+        ("avalon_mini", "winReason", [(1, {"evil": 1}), (2, {"evil": 2}), (2, {"good": 2})]),
+    ],
+)
+def test_grouped_batch_contract_and_discovered_selector_keys(
+    tmp_path: Path, fixture: str, group_by: str, expected: list[tuple[int, dict[str, int]]],
+) -> None:
+    path = _fixture_database(tmp_path, fixture)
+
+    async def check(client: httpx.AsyncClient) -> None:
+        experiment = (await client.get("/api/experiment")).json()
+        assert group_by in experiment["metadata_keys"]
+        payload = (await client.get("/api/runs", params={"group_by": group_by, "limit": 1})).json()
+        assert len(payload["rows"]) == 1
+        assert [(group["run_count"], group["outcome_distribution"]) for group in payload["groups"]] == expected
+        assert all(set(group) == GROUP_FIELDS for group in payload["groups"])
 
     _check(path, check)
 

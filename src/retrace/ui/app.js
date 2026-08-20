@@ -1,6 +1,6 @@
 import { Component, h, render } from "/ui/vendor/preact.module.js";
 import htm from "/ui/vendor/htm.module.js";
-import { cycleSort, formatCell, groupByTurn, highlightSegments, laneFor, matchesSearch, parseHashState, parseTableHashState, previewOf, serializeHashState, serializeTableHashState, toggleColumn } from "/ui/logic.js";
+import { cycleSort, formatCell, groupByTurn, groupValueOf, highlightSegments, laneFor, matchesSearch, outcomeBarSegments, parseHashState, parseTableHashState, previewOf, serializeHashState, serializeTableHashState, toggleColumn } from "/ui/logic.js";
 
 const html = htm.bind(h);
 const PAGE_SIZE = 500;
@@ -10,6 +10,7 @@ const SUMMARY_COLUMNS = [
   ["n_turns", "turns"], ["duration_s", "duration"], ["total_cost", "cost"],
   ["ingest_warnings", "warnings"], ["n_repaired", "repaired"],
 ];
+const GROUP_COLORS = ["#3973ac", "#b75c31", "#36855b", "#8056a5", "#b33b67", "#2a858f", "#867326", "#596b9d"];
 
 async function json(url) {
   const response = await fetch(url);
@@ -140,7 +141,7 @@ class Replay extends Component {
 }
 
 class BatchTable extends Component {
-  state = { experiment: null, rows: [], total: 0, outcomes: [], busy: false, error: "", draftKey: "", draftValue: "" };
+  state = { experiment: null, rows: [], groups: [], total: 0, outcomes: [], busy: false, error: "", draftKey: "", draftValue: "" };
   request = 0;
   componentDidMount() {
     this.setState({ draftKey: this.props.view.metadataKey || "", draftValue: this.props.view.metadataValue || "" });
@@ -161,22 +162,25 @@ class BatchTable extends Component {
     const params = new URLSearchParams({ sort: view.sort, order: view.order, limit: RUN_PAGE_SIZE, offset: view.offset });
     if (view.outcome) params.set("outcome", view.outcome);
     if (view.metadataKey && view.metadataValue != null) params.set(view.metadataKey, view.metadataValue);
+    if (view.groupBy) params.set("group_by", view.groupBy);
     this.setState({ busy: true, error: "" });
     try {
       const page = await json(`/api/runs?${params}`);
       if (request === this.request) this.setState(current => ({
-        rows: page.rows, total: page.total, busy: false,
+        rows: page.rows, groups: page.groups || [], total: page.total, busy: false,
         outcomes: [...new Set(current.outcomes.concat(page.rows.map(row => row.outcome).filter(value => value != null)))].sort(),
       }));
     } catch (reason) {
       if (request === this.request) this.setState({ busy: false, error: String(reason) });
     }
   }
-  render({ view, onState, onOpen }, { experiment, rows, total, outcomes, busy, error, draftKey, draftValue }) {
+  render({ view, onState, onOpen }, { experiment, rows, groups, total, outcomes, busy, error, draftKey, draftValue }) {
     const keys = experiment?.metadata_keys || [];
     const end = Math.min(view.offset + rows.length, total);
     return html`<section class="batch"><header><h1>Runs</h1><span>${experiment ? `${experiment.run_count} runs` : "Loading..."}</span></header>
       <div class="table-controls">
+        <label>Group by<select value=${view.groupBy || ""} onChange=${event => onState({ groupBy: event.target.value || null, offset: 0 })}>
+          <option value="">No grouping</option>${keys.map(key => html`<option value=${key}>${key}</option>`)}</select></label>
         <label>Outcome<select value=${view.outcome || ""} onChange=${event => onState({ outcome: event.target.value || null, offset: 0 })}>
           <option value="">All</option>${[...new Set(outcomes.concat(view.outcome || []))].sort().map(value => html`<option value=${value}>${value}</option>`)}</select></label>
         <form onSubmit=${event => { event.preventDefault(); onState({ metadataKey: draftKey || null, metadataValue: draftKey && draftValue !== "" ? draftValue : null, offset: 0 }); }}>
@@ -191,9 +195,25 @@ class BatchTable extends Component {
       <div class="table-wrap"><table class="run-table"><thead><tr>
         ${SUMMARY_COLUMNS.map(([field, label]) => html`<th><button class="sort" onClick=${() => onState({ ...cycleSort(view, field), offset: 0 })}>${label}${view.sort === field ? (view.order === "asc" ? " ^" : " v") : ""}</button></th>`)}
         ${view.columns.map(key => html`<th>${key}</th>`)}</tr></thead><tbody>
-        ${rows.map(row => html`<tr key=${row.id} tabIndex="0" onClick=${() => onOpen(row.id)} onKeyDown=${event => { if (event.key === "Enter") onOpen(row.id); }}>
-          ${SUMMARY_COLUMNS.map(([field]) => html`<td>${formatCell(row[field], field)}</td>`)}
-          ${view.columns.map(key => html`<td>${formatCell(row.metadata[key], key)}</td>`)}</tr>`)}
+        ${(view.groupBy ? groups.flatMap(group => {
+          const groupRows = rows.filter(row => String(groupValueOf(row, view.groupBy)) === String(group.group_value));
+          const segments = outcomeBarSegments(group.outcome_distribution, 240);
+          const header = html`<tr class="group-header"><th colSpan=${SUMMARY_COLUMNS.length + view.columns.length}>
+            <div class="group-title">${group.group_value ?? "(missing)"}</div>
+            <div class="aggregate-strip">
+              <span>${group.run_count} runs</span><span>turns mean ${formatCell(group.mean_turns, "mean_turns")}, median ${formatCell(group.median_turns, "median_turns")}</span>
+              <span>mean cost ${formatCell(group.mean_cost, "total_cost")}${group.cost_excluded ? ` (cost n/a for ${group.cost_excluded})` : ""}</span>
+              <span>mean duration ${formatCell(group.mean_duration, "duration_s")}${group.duration_excluded ? ` (duration n/a for ${group.duration_excluded})` : ""}</span>
+              ${groupRows.length === 0 && html`<span class="other-pages">rows on other pages</span>`}
+            </div>
+            <svg class="outcome-bar" viewBox="0 0 240 18" role="img" aria-label="Outcome distribution">
+              ${segments.map(segment => html`<rect x=${segment.x} y="0" width=${segment.width} height="18" fill=${GROUP_COLORS[segment.colorIndex % GROUP_COLORS.length]}><title>${segment.label}: ${segment.count}</title></rect>`)}
+            </svg>
+          </th></tr>`;
+          return [header, ...groupRows.map(row => ({ row }))];
+        }) : rows.map(row => ({ row }))).map(item => item.row ? html`<tr key=${item.row.id} tabIndex="0" onClick=${() => onOpen(item.row.id)} onKeyDown=${event => { if (event.key === "Enter") onOpen(item.row.id); }}>
+          ${SUMMARY_COLUMNS.map(([field]) => html`<td>${formatCell(item.row[field], field)}</td>`)}
+          ${view.columns.map(key => html`<td>${formatCell(item.row.metadata[key], key)}</td>`)}</tr>` : item)}
       </tbody></table></div>
       <footer class="paging"><button disabled=${busy || view.offset === 0} onClick=${() => onState({ offset: Math.max(0, view.offset - RUN_PAGE_SIZE) })}>Previous</button>
         <span>Showing ${total === 0 ? 0 : view.offset + 1}-${end} of ${total}</span>

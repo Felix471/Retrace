@@ -62,7 +62,7 @@ export function serializeHashState(state) {
 
 const TABLE_DEFAULTS = {
   sort: "id", order: "asc", outcome: null, metadataKey: null,
-  metadataValue: null, columns: [], offset: 0,
+  metadataValue: null, groupBy: null, columns: [], offset: 0,
 };
 
 export function parseTableHashState(hash) {
@@ -76,6 +76,7 @@ export function parseTableHashState(hash) {
     outcome: present(params, "outcome"),
     metadataKey: present(params, "key"),
     metadataValue: present(params, "value"),
+    groupBy: present(params, "group_by"),
     columns: params.getAll("column").filter((key, index, values) => key && values.indexOf(key) === index),
     offset: Number.isFinite(offset) && offset >= 0 ? offset : 0,
   };
@@ -88,11 +89,30 @@ export function serializeTableHashState(state) {
   if (state?.outcome != null && state.outcome !== "") params.set("outcome", String(state.outcome));
   if (state?.metadataKey != null && state.metadataKey !== "") params.set("key", String(state.metadataKey));
   if (state?.metadataValue != null && state.metadataValue !== "") params.set("value", String(state.metadataValue));
+  if (state?.groupBy != null && state.groupBy !== "") params.set("group_by", String(state.groupBy));
   for (const key of state?.columns || []) if (key !== "") params.append("column", String(key));
   const offset = Number(state?.offset);
   if (Number.isInteger(offset) && offset > 0) params.set("offset", String(offset));
   const query = params.toString();
   return `#/${query ? `?${query}` : ""}`;
+}
+
+export function groupValueOf(run, groupKey) {
+  if (!groupKey || !run?.metadata || !Object.prototype.hasOwnProperty.call(run.metadata, groupKey)) return null;
+  return run.metadata[groupKey] ?? null;
+}
+
+export function outcomeBarSegments(distribution, totalWidth) {
+  const entries = Object.entries(distribution || {}).filter(([, count]) => Number(count) > 0);
+  const total = entries.reduce((sum, [, count]) => sum + Number(count), 0);
+  if (total === 0 || !(Number(totalWidth) >= 0)) return [];
+  let x = 0;
+  return entries.map(([label, count], index) => {
+    const width = index === entries.length - 1 ? Number(totalWidth) - x : Number(totalWidth) * Number(count) / total;
+    const segment = { label, count: Number(count), x, width, colorIndex: index };
+    x += width;
+    return segment;
+  });
 }
 
 export function toggleColumn(selected, key) {

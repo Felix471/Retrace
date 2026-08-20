@@ -113,14 +113,45 @@ def test_table_hash_state_round_trip_and_defaults() -> None:
     state = {
         "sort": "total_cost", "order": "desc", "outcome": "done & checked",
         "metadataKey": "group/name", "metadataValue": "A+B", "columns": ["group/name", "seed"],
-        "offset": 400,
+        "groupBy": "model_name", "offset": 400,
     }
     encoded = _call("serializeTableHashState", state)
     assert _call("parseTableHashState", encoded) == state
     assert _call("parseTableHashState", "") == {
         "sort": "id", "order": "asc", "outcome": None, "metadataKey": None,
-        "metadataValue": None, "columns": [], "offset": 0,
+        "metadataValue": None, "groupBy": None, "columns": [], "offset": 0,
     }
+
+
+def test_table_hash_state_without_grouping_remains_stable() -> None:
+    state = _call("parseTableHashState", "#/?sort=n_turns&column=seed")
+    assert state["groupBy"] is None
+    assert _call("parseTableHashState", _call("serializeTableHashState", state)) == state
+
+
+def test_outcome_bar_segments_are_proportional_and_ordered() -> None:
+    assert _call("outcomeBarSegments", {"won": 1, "lost": 3}, 100) == [
+        {"label": "won", "count": 1, "x": 0, "width": 25, "colorIndex": 0},
+        {"label": "lost", "count": 3, "x": 25, "width": 75, "colorIndex": 1},
+    ]
+
+
+def test_outcome_bar_segments_absorb_remainder_and_omit_zeroes() -> None:
+    segments = _call("outcomeBarSegments", {"a": 1, "unused": 0, "b": 1, "c": 1}, 10)
+    assert [segment["label"] for segment in segments] == ["a", "b", "c"]
+    assert sum(segment["width"] for segment in segments) == 10
+    assert segments[-1]["x"] + segments[-1]["width"] == 10
+
+
+def test_outcome_bar_single_outcome_fills_width() -> None:
+    assert _call("outcomeBarSegments", {"only": 7}, 83)[0]["width"] == 83
+
+
+def test_group_value_of_present_missing_and_null() -> None:
+    run = {"metadata": {"model": "small", "empty": None}}
+    assert _call("groupValueOf", run, "model") == "small"
+    assert _call("groupValueOf", run, "absent") is None
+    assert _call("groupValueOf", run, "empty") is None
 
 
 def test_toggle_column_add_remove_order_and_no_duplicates() -> None:
