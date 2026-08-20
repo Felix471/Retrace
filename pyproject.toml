@@ -35,7 +35,7 @@ include-package-data = true
 where = ["src"]
 
 [tool.setuptools.package-data]
-retrace = ["adapters/builtin/*.yaml"]
+retrace = ["adapters/builtin/*.yaml", "ui/*.html", "ui/*.js", "ui/vendor/*.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import socket
 import sys
+import webbrowser
 from collections import defaultdict
 from collections.abc import Sequence
 from pathlib import Path
@@ -16,12 +18,36 @@ from retrace.adapters.mapping_schema import MappingConfigError
 from retrace.adapters.registry import ConfigResolutionError, resolve_config
 from retrace.core.ingest import IngestReport, ingest, stable_root_hash
 from retrace.core.store import SqliteStore
+from retrace.server.app import create_app
 
 
-def serve(store_path: Path, host: str, port: int, open_browser: bool) -> None:
-    """Start the web application once its implementation is available."""
-    del store_path, host, port, open_browser
-    raise NotImplementedError("server lands in the next task")
+def _resolve_bind_host(host: str | None) -> str:
+    """Resolve the safe implicit host and warn about explicit network exposure."""
+    if host is None:
+        return "127.0.0.1"
+    if host not in {"127.0.0.1", "localhost"}:
+        print(f"Warning: explicitly serving on non-local host {_ascii(host)}")
+    return host
+
+
+def _pick_free_port(host: str = "127.0.0.1") -> int:
+    """Ask the operating system for an available TCP port."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind((host, 0))
+        return int(listener.getsockname()[1])
+
+
+def serve(store_path: Path, host: str, port: int | None, open_browser: bool) -> None:
+    """Start the web application in this process."""
+    import uvicorn
+
+    selected_port = _pick_free_port(host) if port is None else port
+    url_host = "127.0.0.1" if host == "localhost" else host
+    url = f"http://{url_host}:{selected_port}"
+    print(f"Serving: {url}")
+    if open_browser:
+        webbrowser.open(url)
+    uvicorn.run(create_app(store_path), host=host, port=selected_port)
 
 
 def _ascii(value: object) -> str:
@@ -51,7 +77,7 @@ def _print_report(
         if rate is not None:
             print(f"  {_ascii(path)}: {rate:.1f}% ({counter.hits}/{total})")
     print(f"Warnings: {warning_count} total")
-    print(f"Repaired: {sum(getattr(run, 'n_repaired') for run in runs)} total")
+    print(f"Repaired: {sum(run.n_repaired for run in runs)} total")
     print("Repair rules:")
     if report.repair_rule_counts:
         for (source, field, strategy), (fired, considered) in sorted(
@@ -104,6 +130,7 @@ def _view(args: argparse.Namespace) -> int:
 
     with SqliteStore(store_path) as store:
         report = ingest(config, root, store, reingest=args.reingest, progress=progress)
+        store.meta_set("adapter_ref", adapter_ref)
         stored_summary = store.experiment_summary()
         summary = (
             stored_summary[0],
@@ -119,10 +146,7 @@ def _view(args: argparse.Namespace) -> int:
     )
     if report.config_hash_warning:
         print("Warning: mapping configuration changed; tag anchors may detach")
-    try:
-        serve(store_path, args.host, args.port, not args.no_browser)
-    except NotImplementedError as error:
-        print(_ascii(error))
+    serve(store_path, _resolve_bind_host(args.host), args.port, not args.no_browser)
     return 0
 
 
@@ -137,8 +161,8 @@ def _parser() -> argparse.ArgumentParser:
     view = commands.add_parser("view", help="ingest logs and open the viewer")
     view.add_argument("path")
     view.add_argument("--config")
-    view.add_argument("--port", type=int, default=8000)
-    view.add_argument("--host", default="127.0.0.1")
+    view.add_argument("--port", type=int)
+    view.add_argument("--host")
     view.add_argument("--no-browser", action="store_true")
     view.add_argument("--reingest", action="store_true")
     view.add_argument("--cache-dir")
