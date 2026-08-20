@@ -122,7 +122,8 @@ class TagService:
             raise TypeError("invalid tag entry")
         return entry
 
-    def get(self, run_id: str) -> dict[str, Any]:
+    def get_tags_only(self, run_id: str) -> dict[str, Any]:
+        """Read validated tags without loading events or decorating anchors."""
         path, shared = self.sidecar_path(run_id)
         warning = None
         try:
@@ -135,15 +136,20 @@ class TagService:
         except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
             tags, run_note = [], ""
             warning = f"Could not read sidecar {path}: {exc}"
+        result: dict[str, Any] = {"run_id": run_id, "tags": tags, "run_note": run_note}
+        if warning is not None:
+            result["warning"] = warning
+        return result
+
+    def get(self, run_id: str) -> dict[str, Any]:
+        result = self.get_tags_only(run_id)
         events, _ = self.store.get_events(run_id, offset=0, limit=2_147_483_647)
         present = {event.id for event in events}
         decorated = [
             {**tag, "detached_event_ids": [item for item in tag["event_ids"] if item not in present]}
-            for tag in tags
+            for tag in result["tags"]
         ]
-        result: dict[str, Any] = {"run_id": run_id, "tags": decorated, "run_note": run_note}
-        if warning is not None:
-            result["warning"] = warning
+        result["tags"] = decorated
         return result
 
     def put(self, run_id: str, tags: list[object], run_note: str = "") -> dict[str, Any]:

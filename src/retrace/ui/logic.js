@@ -154,6 +154,30 @@ export function outcomeBarSegments(distribution, totalWidth) {
   });
 }
 
+export function distributionBars(modes, maxWidth) {
+  const peak = Math.max(0, ...(modes || []).map(mode => Number(mode.runs_with_tag) || 0));
+  const available = Number(maxWidth) >= 0 ? Number(maxWidth) : 0;
+  return (modes || []).map(mode => ({
+    id: mode.id,
+    width: peak === 0 ? 0 : available * (Number(mode.runs_with_tag) || 0) / peak,
+    label: `${Number(mode.runs_with_tag) || 0} runs, ${Number(mode.total_tags) || 0} tags`,
+  }));
+}
+
+export function groupByCategory(modes) {
+  const groups = [];
+  for (const mode of [...(modes || [])].sort((left, right) =>
+    String(left.id).localeCompare(String(right.id), undefined, { numeric: true }))) {
+    let group = groups.find(item => item.category === mode.category);
+    if (!group) {
+      group = { category: mode.category, modes: [] };
+      groups.push(group);
+    }
+    group.modes.push(mode);
+  }
+  return groups;
+}
+
 export function toggleColumn(selected, key) {
   const columns = [...new Set(selected || [])];
   const index = columns.indexOf(key);

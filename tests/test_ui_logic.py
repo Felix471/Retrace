@@ -167,6 +167,36 @@ def test_outcome_bar_single_outcome_fills_width() -> None:
     assert _call("outcomeBarSegments", {"only": 7}, 83)[0]["width"] == 83
 
 
+def test_distribution_bars_scale_and_label_counts() -> None:
+    modes = [
+        {"id": "1.1", "runs_with_tag": 2, "total_tags": 3},
+        {"id": "1.2", "runs_with_tag": 1, "total_tags": 1},
+        {"id": "1.3", "runs_with_tag": 0, "total_tags": 0},
+    ]
+    assert _call("distributionBars", modes, 200) == [
+        {"id": "1.1", "width": 200, "label": "2 runs, 3 tags"},
+        {"id": "1.2", "width": 100, "label": "1 runs, 1 tags"},
+        {"id": "1.3", "width": 0, "label": "0 runs, 0 tags"},
+    ]
+
+
+def test_distribution_bars_all_zero_never_divides_by_zero() -> None:
+    assert _call("distributionBars", [{"id": "1.1", "runs_with_tag": 0, "total_tags": 0}], 200) == [
+        {"id": "1.1", "width": 0, "label": "0 runs, 0 tags"}
+    ]
+
+
+def test_group_by_category_orders_ids_and_preserves_categories() -> None:
+    modes = [
+        {"id": "2.1", "category": "second"}, {"id": "1.2", "category": "first"},
+        {"id": "1.1", "category": "first"},
+    ]
+    assert _call("groupByCategory", modes) == [
+        {"category": "first", "modes": [modes[2], modes[1]]},
+        {"category": "second", "modes": [modes[0]]},
+    ]
+
+
 def test_group_value_of_present_missing_and_null() -> None:
     run = {"metadata": {"model": "small", "empty": None}}
     assert _call("groupValueOf", run, "model") == "small"

@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
 from retrace.core.aggregate import aggregate_runs
-from retrace.core.mast import FAILURE_MODE_CATEGORIES
+from retrace.core.mast import FAILURE_MODE_CATEGORIES, FAILURE_MODES
 from retrace.core.model import VALID_EVENT_TYPES, Event
 from retrace.core.store import SqliteStore
 from retrace.core.tags import CorruptSidecarError, TagPathError, TagService, TagValidationError
@@ -159,6 +159,37 @@ class TagVocabularyResponse(BaseModel):
     categories: list[FailureModeCategoryResponse]
 
 
+class TagDistributionModeResponse(BaseModel):
+    """Tag counts for one zero-filled MAST mode."""
+
+    id: str
+    name: str
+    category: str
+    runs_with_tag: int
+    total_tags: int
+
+
+class TagDistributionGroupResponse(BaseModel):
+    """Tag distribution among runs sharing one metadata value."""
+
+    group_value: Any | None
+    modes: list[TagDistributionModeResponse]
+    tagged_runs: int
+    total_tags: int
+    total_runs: int
+
+
+class TagDistributionResponse(BaseModel):
+    """Tag distribution across all runs and optional metadata groups."""
+
+    modes: list[TagDistributionModeResponse]
+    tagged_runs: int
+    total_tags: int
+    total_runs: int
+    groups: list[TagDistributionGroupResponse] | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+
 class TagModel(BaseModel):
     """One persisted MAST annotation."""
 
@@ -270,6 +301,73 @@ def create_app(db_path: Path) -> FastAPI:
                 )
                 for category, modes in FAILURE_MODE_CATEGORIES
             ]
+        )
+
+    @app.get("/api/tags/distribution", response_model=TagDistributionResponse)
+    async def tag_distribution(
+        request: Request, group_by: str | None = None
+    ) -> TagDistributionResponse:
+        store: SqliteStore = request.app.state.store
+        listed = store.list_runs(group_by=group_by)
+        run_groups = (
+            [(group_value, run) for group_value, run in listed]
+            if group_by is not None
+            else [(None, run) for run in listed]
+        )
+        counts = {mode.id: [0, 0] for mode in FAILURE_MODES}
+        group_counts: dict[Any, dict[str, list[int]]] = {}
+        group_runs: dict[Any, int] = {}
+        tagged_runs = 0
+        grouped_tagged_runs: dict[Any, int] = {}
+        warnings: list[str] = []
+        service: TagService = request.app.state.tags
+        for group_value, run in run_groups:
+            result = service.get_tags_only(run.id)
+            tags = result["tags"]
+            if warning := result.get("warning"):
+                warnings.append(warning)
+            modes_in_run = {tag["mode"] for tag in tags}
+            tagged_runs += bool(tags)
+            for mode_id in modes_in_run:
+                counts[mode_id][0] += 1
+            for tag in tags:
+                counts[tag["mode"]][1] += 1
+            if group_by is not None:
+                per_mode = group_counts.setdefault(
+                    group_value, {mode.id: [0, 0] for mode in FAILURE_MODES}
+                )
+                group_runs[group_value] = group_runs.get(group_value, 0) + 1
+                grouped_tagged_runs[group_value] = grouped_tagged_runs.get(group_value, 0) + bool(tags)
+                for mode_id in modes_in_run:
+                    per_mode[mode_id][0] += 1
+                for tag in tags:
+                    per_mode[tag["mode"]][1] += 1
+
+        def mode_payload(values: dict[str, list[int]]) -> list[TagDistributionModeResponse]:
+            return [
+                TagDistributionModeResponse(
+                    id=mode.id, name=mode.name, category=mode.category,
+                    runs_with_tag=values[mode.id][0], total_tags=values[mode.id][1],
+                )
+                for mode in FAILURE_MODES
+            ]
+
+        groups = None
+        if group_by is not None:
+            groups = [
+                TagDistributionGroupResponse(
+                    group_value=value,
+                    modes=mode_payload(values),
+                    tagged_runs=grouped_tagged_runs[value],
+                    total_tags=sum(count[1] for count in values.values()),
+                    total_runs=group_runs[value],
+                )
+                for value, values in group_counts.items()
+            ]
+        return TagDistributionResponse(
+            modes=mode_payload(counts), tagged_runs=tagged_runs,
+            total_tags=sum(count[1] for count in counts.values()),
+            total_runs=len(run_groups), groups=groups, warnings=warnings,
         )
 
     @app.get("/api/runs", response_model=RunsResponse)
@@ -412,6 +510,9 @@ __all__ = [
     "RunListItem",
     "RunResponse",
     "RunsResponse",
+    "TagDistributionGroupResponse",
+    "TagDistributionModeResponse",
+    "TagDistributionResponse",
     "TagModel",
     "TagVocabularyResponse",
     "TagsPutRequest",

@@ -1,6 +1,6 @@
 import { Component, h, render } from "/ui/vendor/preact.module.js";
 import htm from "/ui/vendor/htm.module.js";
-import { cycleSort, formatCell, groupByTurn, groupValueOf, highlightSegments, laneFor, matchesSearch, outcomeBarSegments, parseHashState, parseTableHashState, previewOf, resolveAnchors, serializeHashState, serializeTableHashState, tagListWith, tagListWithout, toggleColumn, toggleSelection } from "/ui/logic.js";
+import { cycleSort, distributionBars, formatCell, groupByCategory, groupByTurn, groupValueOf, highlightSegments, laneFor, matchesSearch, outcomeBarSegments, parseHashState, parseTableHashState, previewOf, resolveAnchors, serializeHashState, serializeTableHashState, tagListWith, tagListWithout, toggleColumn, toggleSelection } from "/ui/logic.js";
 
 const html = htm.bind(h);
 const PAGE_SIZE = 500;
@@ -211,11 +211,12 @@ class Replay extends Component {
 }
 
 class BatchTable extends Component {
-  state = { experiment: null, rows: [], groups: [], total: 0, outcomes: [], busy: false, error: "", draftKey: "", draftValue: "" };
+  state = { experiment: null, rows: [], groups: [], total: 0, outcomes: [], distribution: null, vocabulary: [], busy: false, error: "", draftKey: "", draftValue: "" };
   request = 0;
   componentDidMount() {
     this.setState({ draftKey: this.props.view.metadataKey || "", draftValue: this.props.view.metadataValue || "" });
     json("/api/experiment").then(experiment => this.setState({ experiment })).catch(reason => this.setState({ error: String(reason) }));
+    json("/api/tags/vocabulary").then(value => this.setState({ vocabulary: value.categories.flatMap(category => category.modes) })).catch(reason => this.setState({ error: String(reason) }));
     this.load();
   }
   componentDidUpdate(previous) {
@@ -235,16 +236,21 @@ class BatchTable extends Component {
     if (view.groupBy) params.set("group_by", view.groupBy);
     this.setState({ busy: true, error: "" });
     try {
-      const page = await json(`/api/runs?${params}`);
+      const distributionParams = new URLSearchParams();
+      if (view.groupBy) distributionParams.set("group_by", view.groupBy);
+      const [page, distribution] = await Promise.all([
+        json(`/api/runs?${params}`),
+        json(`/api/tags/distribution?${distributionParams}`),
+      ]);
       if (request === this.request) this.setState(current => ({
-        rows: page.rows, groups: page.groups || [], total: page.total, busy: false,
+        rows: page.rows, groups: page.groups || [], total: page.total, distribution, busy: false,
         outcomes: [...new Set(current.outcomes.concat(page.rows.map(row => row.outcome).filter(value => value != null)))].sort(),
       }));
     } catch (reason) {
       if (request === this.request) this.setState({ busy: false, error: String(reason) });
     }
   }
-  render({ view, onState, onOpen }, { experiment, rows, groups, total, outcomes, busy, error, draftKey, draftValue }) {
+  render({ view, onState, onOpen }, { experiment, rows, groups, total, outcomes, distribution, vocabulary, busy, error, draftKey, draftValue }) {
     const keys = experiment?.metadata_keys || [];
     const end = Math.min(view.offset + rows.length, total);
     return html`<section class="batch"><header><h1>Runs</h1><span>${experiment ? `${experiment.run_count} runs` : "Loading..."}</span></header>
@@ -288,6 +294,27 @@ class BatchTable extends Component {
       <footer class="paging"><button disabled=${busy || view.offset === 0} onClick=${() => onState({ offset: Math.max(0, view.offset - RUN_PAGE_SIZE) })}>Previous</button>
         <span>Showing ${total === 0 ? 0 : view.offset + 1}-${end} of ${total}</span>
         <button disabled=${busy || end >= total} onClick=${() => onState({ offset: view.offset + RUN_PAGE_SIZE })}>Next</button></footer>
+      <section class="failure-modes"><h2>Failure modes</h2>
+        ${distribution?.warnings?.map(warning => html`<p class="banner warning">${warning}</p>`)}
+        ${distribution && distribution.total_tags === 0
+          ? html`<p class="tag-distribution-empty">No tags yet - open a run and add a failure-mode tag in the replay view</p>`
+          : distribution && (distribution.groups || [{ group_value: null, modes: distribution.modes }]).map((set, setIndex) => {
+            const descriptions = new Map(vocabulary.map(mode => [mode.id, mode.description]));
+            const geometry = new Map(distributionBars(set.modes, 260).map(bar => [bar.id, bar]));
+            return html`<section class="tag-distribution-set">
+              ${distribution.groups && html`<h3>${set.group_value ?? "(none)"}</h3>`}
+              ${groupByCategory(set.modes).map(category => html`<div class="tag-category"><h4>${category.category}</h4>
+                ${category.modes.map(mode => { const bar = geometry.get(mode.id); return html`<div class="tag-bar-row">
+                  <span class="tag-bar-name">${mode.id} ${mode.name}</span>
+                  <svg viewBox="0 0 260 20" role="img" aria-label=${`${mode.id} ${mode.name}: ${bar.label}`} preserveAspectRatio="none">
+                    <title>${mode.id} ${mode.name}: ${descriptions.get(mode.id) || ""}</title>
+                    <rect width=${bar.width} height="20" fill=${GROUP_COLORS[setIndex % GROUP_COLORS.length]}></rect>
+                  </svg><span>${bar.label}</span>
+                </div>`; })}
+              </div>`)}
+            </section>`;
+          })}
+      </section>
     </section>`;
   }
 }
