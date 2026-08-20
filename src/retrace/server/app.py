@@ -13,8 +13,21 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from retrace.core.aggregate import aggregate_runs
 from retrace.core.model import VALID_EVENT_TYPES, Event
 from retrace.core.store import SqliteStore
+
+RUN_SORT_FIELDS = (
+    "id",
+    "outcome",
+    "n_events",
+    "n_turns",
+    "duration_s",
+    "total_cost",
+    "ingest_warnings",
+    "n_repaired",
+)
+RUN_RESERVED_PARAMS = {"group_by", "sort", "order", "limit", "offset"}
 
 
 class RunResponse(BaseModel):
@@ -51,6 +64,32 @@ class RunListItem(BaseModel):
     ingest_warnings: int
     n_repaired: int
     duration_s: float | None
+    metadata: dict[str, Any]
+    total_cost: float | None
+
+
+class RunGroupResponse(BaseModel):
+    """Aggregate statistics for one metadata value."""
+
+    group_value: Any | None
+    run_count: int
+    outcome_distribution: dict[str, int]
+    mean_turns: float
+    median_turns: float
+    mean_cost: float | None
+    cost_excluded: int
+    mean_duration: float | None
+    duration_excluded: int
+
+
+class RunsResponse(BaseModel):
+    """A bounded page of filtered runs and optional unpaginated groups."""
+
+    rows: list[RunListItem]
+    total: int
+    offset: int
+    limit: int = Field(description="Applied page size, capped at 1000.")
+    groups: list[RunGroupResponse] | None = None
 
 
 class RepairedFieldResponse(BaseModel):
@@ -149,10 +188,36 @@ def create_app(db_path: Path) -> FastAPI:
             "metadata_keys": metadata_keys,
         }
 
-    @app.get("/api/runs", response_model=list[RunListItem])
-    async def runs(request: Request) -> list[RunListItem]:
+    @app.get("/api/runs", response_model=RunsResponse)
+    async def runs(
+        request: Request,
+        group_by: str | None = None,
+        sort: str = "id",
+        order: str = "asc",
+        limit: Annotated[int, Query(ge=0)] = 200,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ) -> RunsResponse:
         store: SqliteStore = request.app.state.store
-        return [
+        if sort not in RUN_SORT_FIELDS:
+            valid = ", ".join(RUN_SORT_FIELDS)
+            raise HTTPException(status_code=422, detail=f"sort must be one of: {valid}")
+        if order not in {"asc", "desc"}:
+            raise HTTPException(status_code=422, detail="order must be one of: asc, desc")
+
+        filters: dict[str, list[str]] = {}
+        for key, value in request.query_params.multi_items():
+            if key not in RUN_RESERVED_PARAMS:
+                filters.setdefault(key, []).append(value)
+        filtered = store.list_runs(filters=filters)
+        run_rows = [run for run in filtered if not isinstance(run, tuple)]
+        run_rows.sort(key=lambda run: run.id)
+        present = [run for run in run_rows if getattr(run, sort) is not None]
+        missing = [run for run in run_rows if getattr(run, sort) is None]
+        present.sort(key=lambda run: getattr(run, sort), reverse=order == "desc")
+        sorted_rows = present + missing
+        applied_limit = min(limit, 1000)
+        page = sorted_rows[offset : offset + applied_limit]
+        rows = [
             RunListItem(
                 id=run.id,
                 outcome=run.outcome,
@@ -161,9 +226,21 @@ def create_app(db_path: Path) -> FastAPI:
                 ingest_warnings=run.ingest_warnings,
                 n_repaired=run.n_repaired,
                 duration_s=run.duration_s,
+                metadata=run.metadata,
+                total_cost=run.total_cost,
             )
-            for run in store.list_runs()
+            for run in page
         ]
+        groups = None
+        if group_by is not None:
+            groups = [RunGroupResponse.model_validate(group, from_attributes=True) for group in aggregate_runs(store, filters, group_by)]
+        return RunsResponse(
+            rows=rows,
+            total=len(sorted_rows),
+            offset=offset,
+            limit=applied_limit,
+            groups=groups,
+        )
 
     @app.get("/api/runs/{run_id}", response_model=RunResponse)
     async def run_summary(request: Request, run_id: str) -> dict[str, Any]:
@@ -218,7 +295,9 @@ def create_app(db_path: Path) -> FastAPI:
 __all__ = [
     "EventResponse",
     "EventsResponse",
+    "RunGroupResponse",
     "RunListItem",
     "RunResponse",
+    "RunsResponse",
     "create_app",
 ]

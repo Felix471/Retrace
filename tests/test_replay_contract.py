@@ -49,13 +49,14 @@ def test_flat_run_list_contract_and_order(tmp_path: Path, fixture: str, count: i
         response = await client.get("/api/runs")
         assert response.status_code == 200
         payload = response.json()
-        assert len(payload) == count
-        assert [run["id"] for run in payload] == expected_ids
+        assert payload["total"] == count
+        assert [run["id"] for run in payload["rows"]] == expected_ids
         required = {
             "id", "outcome", "n_events", "n_turns", "ingest_warnings",
             "n_repaired", "duration_s",
         }
-        assert all(set(run) == required for run in payload)
+        required |= {"metadata", "total_cost"}
+        assert all(set(run) == required for run in payload["rows"])
 
     asyncio.run(_with_client(path, check))
 
@@ -65,7 +66,7 @@ def test_run_and_event_replay_contract(tmp_path: Path, fixture: str) -> None:
     path = _database(tmp_path, fixture)
 
     async def check(client: httpx.AsyncClient) -> None:
-        runs = (await client.get("/api/runs")).json()
+        runs = (await client.get("/api/runs")).json()["rows"]
         for item in runs:
             run = (await client.get(f"/api/runs/{item['id']}")).json()
             assert {"agent_ids", "ingest_warnings", "n_repaired"} <= set(run)
@@ -105,7 +106,7 @@ def test_advertised_replay_filters_have_events(tmp_path: Path) -> None:
     path = _database(tmp_path, "avalon_mini")
 
     async def check(client: httpx.AsyncClient) -> None:
-        run_id = (await client.get("/api/runs")).json()[0]["id"]
+        run_id = (await client.get("/api/runs")).json()["rows"][0]["id"]
         run = (await client.get(f"/api/runs/{run_id}")).json()
         for field, values in (("agent", run["agents"]), ("phase", run["phases"]), ("type", run["types"])):
             for value in values:

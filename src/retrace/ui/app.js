@@ -137,7 +137,7 @@ class App extends Component {
   changed = () => this.setState({ view: parseHashState(location.hash) });
   updateView = changes => { location.hash = serializeHashState({ ...this.state.view, ...changes }); };
   componentDidMount() {
-    json("/api/runs").then(runs => this.setState({ runs })).catch(reason => this.setState({ error: String(reason) }));
+    json("/api/runs").then(response => this.setState({ runs: response.rows })).catch(reason => this.setState({ error: String(reason) }));
     addEventListener("hashchange", this.changed);
   }
   componentWillUnmount() { removeEventListener("hashchange", this.changed); }
