@@ -30,6 +30,7 @@
 
 ## Second step: inspect aggregate JSONL and repairs
 
+This is the author's real experiment corpus, included because it contains real logging defects the tool repairs and flags; the game domain is irrelevant.
 After completing the demo tour, run `retrace-logs view fixtures/avalon_mini`.
 This fixture demonstrates the LINE-PER-RUN layout: five runs come from one
 aggregate JSONL file, and each run id is the per-line `gameId` value. The viewer
@@ -41,5 +42,6 @@ the banner **1 records repaired in this run**. Its repaired event has a
 turn 4 is shown as 5, and result `fail` is shown as `success`. The run whose id
 ends in `6ius8` shows **2 records repaired in this run**.
 
+This is the author's real experiment corpus, included because it contains real logging defects the tool repairs and flags; the game domain is irrelevant.
 Run `retrace-logs check fixtures/avalon_mini` to see the repair-rule fire
 counts: `ordinal` fired 3 and `derive` fired 1.

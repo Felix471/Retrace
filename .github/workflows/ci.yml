@@ -39,6 +39,9 @@ jobs:
       - name: Check core purity
         run: python scripts/check_core_purity.py
 
+      - name: Check documentation presentation
+        run: python scripts/check_docs_presentation.py
+
       - name: README quickstart smoke
         if: matrix.python-version == '3.11'
         run: |

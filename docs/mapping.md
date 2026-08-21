@@ -137,6 +137,8 @@ attributes are stored at `metadata._retrace.agent`.
 | `sniff` | object, optional | Data-only signature for built-in selection. | `sniff: {required_fields: [kind]}` |
 | `required_fields` | non-empty list of strings, required | Top-level keys that must all occur in the first valid candidate record. | `required_fields: [id, events]` |
 
+This is the author's real experiment corpus, included because it contains real
+logging defects the tool repairs and flags; the game domain is irrelevant.
 Resolution order is: explicit `--config`; a `retrace.yaml` beside the target;
 the first matching shipped builtin (`builtin:avalon` or
 `builtin:support_pipeline`); otherwise `retrace-logs init` is suggested to
