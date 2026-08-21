@@ -1,0 +1,23 @@
+# Status: requires gap G2
+# G2 must emit records with timestamp, agent, kind, and content fields.
+retrace_mapping: 1
+run_discovery:
+  pattern: MagenticOne_GAIA/*/*
+  unit: dir
+  events_file: 0/console_log.txt
+run:
+  id: "{dir_name}"
+event:
+  turn: turn
+  timestamp: timestamp
+  agent_id: agent
+  type:
+    from: kind
+    map:
+      message: message
+      tool_call: tool_call
+      tool_result: tool_result
+      system: system
+    default: other
+  content: content
+  metadata: rest

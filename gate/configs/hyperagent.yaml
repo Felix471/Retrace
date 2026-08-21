@@ -1,0 +1,23 @@
+# Status: requires gap G1
+# Scalar trajectory entries are retained as JSON-rendered event content today.
+retrace_mapping: 1
+run_discovery:
+  pattern: HyperAgent/*.json
+  unit: file
+run:
+  id: "{file_stem}"
+  metadata:
+    instance_id: instance_id
+event:
+  sources:
+    - name: trajectory
+      path: trajectory
+      type: other
+      repairs:
+        - field: turn
+          strategy: ordinal
+          base: 0
+sniff:
+  required_fields:
+    - instance_id
+    - trajectory

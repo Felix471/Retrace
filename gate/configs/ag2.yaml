@@ -1,0 +1,29 @@
+# Status: requires gap G1
+retrace_mapping: 1
+run_discovery:
+  pattern: AG2/*.json
+  unit: file
+run:
+  id: "{file_stem}"
+  metadata:
+    instance_id: instance_id
+    correct: other_data.correct
+    perturbation_type: other_data.perturbation_type
+event:
+  sources:
+    - name: trajectory
+      path: trajectory
+      type: message
+      fields:
+        agent_id: name
+        role: role
+        content: content
+        metadata: rest
+      repairs:
+        - field: turn
+          strategy: ordinal
+          base: 0
+sniff:
+  required_fields:
+    - instance_id
+    - trajectory

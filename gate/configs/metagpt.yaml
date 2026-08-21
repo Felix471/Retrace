@@ -1,0 +1,24 @@
+# Status: requires gap G2
+# G2 must emit records with timestamp, agent, role, phase, kind, and content fields.
+retrace_mapping: 1
+run_discovery:
+  pattern: programdev/metagpt/*.txt
+  unit: file
+run:
+  id: "{file_stem}"
+event:
+  turn: turn
+  timestamp: timestamp
+  agent_id: agent
+  role: role
+  phase: phase
+  content: content
+  type:
+    from: kind
+    map:
+      message: message
+      tool_call: tool_call
+      tool_result: tool_result
+      system: system
+    default: other
+  metadata: rest
