@@ -14,6 +14,10 @@ from retrace.adapters.protocol import Adapter
 from retrace.core.model import Event, Run
 
 ROOT = Path(__file__).resolve().parents[1]
+README_VERDICT = (
+    "tested against real AG2 and HyperAgent traces from the MAST corpus (config-only); "
+    "free-text logs are out of scope in v1."
+)
 
 
 def _schema_keys() -> set[str]:
@@ -31,6 +35,11 @@ def test_mapping_reference_covers_every_schema_key() -> None:
     text = (ROOT / "docs" / "mapping.md").read_text(encoding="ascii")
     documented = set(re.findall(r"`([A-Za-z_][A-Za-z0-9_]*)`", text))
     assert _schema_keys() <= documented
+
+
+def test_readme_has_owner_verdict_verbatim() -> None:
+    text = (ROOT / "README.md").read_text(encoding="ascii")
+    assert README_VERDICT in text
 
 
 def test_readme_quickstart_check_command_executes() -> None:

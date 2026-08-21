@@ -1,4 +1,5 @@
 {
   "corpus_name": "avalon",
-  "framing_sentence": "This is the author's real experiment corpus, included because it contains real logging defects the tool repairs and flags; the game domain is irrelevant."
+  "framing_sentence": "This is the author's real experiment corpus, included because it contains real logging defects the tool repairs and flags; the game domain is irrelevant.",
+  "banned_phrases": ["arbitrary logs"]
 }

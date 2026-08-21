@@ -4,6 +4,8 @@ Retrace is a local-first viewer for inspecting, replaying, tagging, and comparin
 structured multi-agent logs. It is an offline inspection tool, not a monitoring
 service, SDK, or cloud platform.
 
+tested against real AG2 and HyperAgent traces from the MAST corpus (config-only); free-text logs are out of scope in v1.
+
 See the [changelog](CHANGELOG.md) for release notes.
 
 ## Install
@@ -39,7 +41,11 @@ The compare view aligns two selected runs and identifies structural and content
 divergences. Comparison uses the stored event sequence; it is not semantic
 similarity analysis.
 
-## Bring your own logs
+## Bring your own structured logs
+
+Retrace accepts structured logs (JSON/JSONL, any of the supported layouts: one
+file per run, one directory per run, one line per run, one JSON document per
+run).
 
 Draft and refine a declarative mapping, validate it, then view the result:
 

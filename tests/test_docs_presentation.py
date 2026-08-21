@@ -14,6 +14,7 @@ PRESENTATION = json.loads(
 )
 CORPUS_NAME = PRESENTATION["corpus_name"]
 FRAMING_SENTENCE = PRESENTATION["framing_sentence"]
+BANNED_PHRASES = PRESENTATION["banned_phrases"]
 USER_DOCS = [
     REPO_ROOT / "README.md",
     *sorted((REPO_ROOT / "docs").glob("*.md")),
@@ -83,6 +84,21 @@ def test_real_tree_lint_script_passes() -> None:
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_banned_phrase_rule_fails_seeded_doc_and_accepts_clean_doc(tmp_path: Path) -> None:
+    phrase = BANNED_PHRASES[0]
+    root = _synthetic_tree(tmp_path, "# Project\n", "# Walkthrough\n")
+    mapping = root / "docs" / "mapping.md"
+    mapping.write_text(f"Supports {phrase.upper()}.\n", encoding="utf-8")
+
+    violations = check(root)
+    assert [(item.path, item.line, item.reason) for item in violations] == [
+        ("docs/mapping.md", 1, f"banned phrase: {phrase}")
+    ]
+
+    mapping.write_text("Supports structured JSON records.\n", encoding="utf-8")
+    assert check(root) == []
 
 
 def test_walkthrough_second_step_starts_with_exact_framing_sentence() -> None:

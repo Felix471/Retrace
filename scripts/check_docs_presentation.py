@@ -25,6 +25,11 @@ def _corpus_name() -> str:
     return str(config["corpus_name"])
 
 
+def _banned_phrases() -> list[str]:
+    config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    return [str(phrase) for phrase in config.get("banned_phrases", [])]
+
+
 @dataclass(frozen=True, order=True)
 class Violation:
     path: str
@@ -74,6 +79,22 @@ def _fenced_line_numbers(lines: list[str], start: int, end: int) -> list[int]:
 def check(root: Path) -> list[Violation]:
     token = _corpus_name().lower()
     violations: list[Violation] = []
+
+    user_docs = [root / "README.md", root / "CHANGELOG.md", root / "demo" / "README.md"]
+    docs_dir = root / "docs"
+    if docs_dir.is_dir():
+        user_docs.extend(sorted(docs_dir.glob("*.md")))
+    for path in user_docs:
+        if not path.is_file():
+            continue
+        relative = path.relative_to(root).as_posix()
+        for index, line in enumerate(path.read_text(encoding="utf-8").splitlines()):
+            lowered = line.lower()
+            for phrase in _banned_phrases():
+                if phrase.lower() in lowered:
+                    violations.append(
+                        Violation(relative, index + 1, f"banned phrase: {phrase}")
+                    )
 
     readme_path = root / "README.md"
     readme = readme_path.read_text(encoding="utf-8").splitlines()

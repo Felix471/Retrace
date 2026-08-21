@@ -5,6 +5,10 @@ Expressions are JMESPath unless a field is described as a path, glob, template,
 or literal. This complete example shows the hierarchy; the tables below define
 every accepted key.
 
+Retrace accepts structured logs (JSON/JSONL, any of the supported layouts: one
+file per run, one directory per run, one line per run, one JSON document per
+run).
+
 ```yaml
 retrace_mapping: 1
 run_discovery: {pattern: "case-*", unit: dir, events_file: events.jsonl}
@@ -29,6 +33,41 @@ event:
 agents: {path: roster, key: id, attributes: {team: team, role: role}}
 sniff: {required_fields: [kind, text]}
 ```
+
+## Text logs
+
+If your source has free-text lines rather than JSON records, preprocess it once
+before using Retrace. Write a small script that emits one JSON object per event
+as JSONL. Aim to include a run ID, an ordinal or timestamp, an agent or speaker
+field, a type, and the content. Preserve unknown extra fields so a mapping can
+place them in metadata. Group the output per run as one JSONL file per run (or
+one directory per run).
+
+This template converts a generic `timestamp | speaker | message` format. Adapt
+the delimiter, field names, and run-ID source to your data:
+
+```python
+import json
+from pathlib import Path
+
+source = Path("input.txt")
+destination = Path("run-001.jsonl")
+run_id = "run-001"
+
+with source.open(encoding="utf-8") as input_file, destination.open(
+    "w", encoding="utf-8"
+) as output_file:
+    for ordinal, line in enumerate(input_file):
+        timestamp, speaker, message = line.rstrip("\n").split(" | ", 2)
+        event = {"run_id": run_id, "ordinal": ordinal, "timestamp": timestamp,
+                 "speaker": speaker, "type": "message", "content": message}
+        output_file.write(json.dumps(event, ensure_ascii=False) + "\n")
+```
+
+Run `retrace-logs init` on the converted output, edit the generated mapping to
+resolve its TODOs, run `retrace-logs check` until it is clean, and then run
+`retrace-logs view`. Retrace never parses free text itself and never executes
+anything from a dataset.
 
 ## Top level and run discovery
 
