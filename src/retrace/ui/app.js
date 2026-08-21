@@ -1,6 +1,6 @@
 import { Component, h, render } from "/ui/vendor/preact.module.js";
 import htm from "/ui/vendor/htm.module.js";
-import { compareStateParse, compareStateSerialize, cycleSort, distributionBars, formatCell, groupByCategory, groupByTurn, groupValueOf, gutterMarkFor, highlightSegments, laneFor, matchesSearch, outcomeBarSegments, pagesNeededFor, parseHashState, parseTableHashState, previewOf, resolveAnchors, selectionToCompareState, serializeHashState, serializeTableHashState, tagListWith, tagListWithout, toggleColumn, toggleSelection } from "/ui/logic.js";
+import { compareBannerState, compareStateParse, compareStateSerialize, cycleSort, distributionBars, formatCell, groupByCategory, groupByTurn, groupValueOf, gutterMarkFor, highlightSegments, laneFor, matchesSearch, outcomeBarSegments, pagesNeededFor, parseHashState, parseTableHashState, previewOf, resolveAnchors, selectionToCompareState, serializeHashState, serializeTableHashState, tagListWith, tagListWithout, toggleColumn, toggleSelection } from "/ui/logic.js";
 
 const html = htm.bind(h);
 const PAGE_SIZE = 500;
@@ -136,10 +136,10 @@ class Compare extends Component {
   render({ a, b, comparator, onState, backHash }, { runs, pairs, total, baseOffset, summary, busy, error }) {
     const pick = (side, value) => html`<label>Run ${side}<select value=${value || ""} onChange=${event => onState({ [side]: event.target.value || null, offset: 0 })}><option value="">Choose run</option>${runs.map(run => html`<option value=${run.id}>${run.id}</option>`)}</select></label>`;
     if (a && b && a === b) return html`<section class="compare"><a class="back" href=${backHash}>Back to runs</a><div class="compare-pickers">${pick("a", a)}${pick("b", b)}</div><p class="empty">Choose two different runs to compare.</p></section>`;
-    const first = summary?.first_divergence;
+    const banner = compareBannerState(summary);
     return html`<section class="compare"><a class="back" href=${backHash}>Back to runs</a><div class="compare-pickers">${pick("a", a)}${pick("b", b)}<label>Comparator<select value=${comparator} onChange=${event => onState({ comparator: event.target.value, offset: 0 })}><option value="normalized">normalized</option><option value="exact">exact</option></select></label></div>
       ${error && html`<p class="error">${error}</p>`}${summary && html`<header><${RunSummary} run=${summary.run_a} /><${RunSummary} run=${summary.run_b} /></header>
-      <div class="banner divergence">${first ? `first divergence: ${first.kind} at pair ${first.index}` : "runs are identical"}${first && html`<button onClick=${() => this.jumpTo(first.index)}>Jump</button>`}</div>
+      <div class="banner divergence"><div><div>${banner.headline}</div>${banner.secondary && html`<div class="divergence-secondary">${banner.secondary} <button class="jump-link" onClick=${() => this.jumpTo(banner.secondaryIndex)}>Jump</button></div>`}</div>${banner.headlineIndex !== null && html`<button onClick=${() => this.jumpTo(banner.headlineIndex)}>Jump</button>`}</div>
       <div class="pair-list">${pairs.map((pair, local) => { const index = baseOffset + local; const divergent = pair.status !== "match"; return html`<div id=${`pair-${index}`} class=${`pair-row status-${pair.status}`}>
         <div class="event-cell">${pair.event_a ? html`<${EventRow} event=${pair.event_a} agentIds=${summary.run_a.agent_ids} />` : html`<div class="event-placeholder" aria-label="No event in run a"></div>`}</div>
         <button class=${`alignment-gutter ${gutterMarkFor(pair.status)}`} title=${`${pair.status} at pair ${index}`} onClick=${divergent ? () => this.jumpTo(index) : null}>${pair.status === "match" ? "=" : pair.status === "content-diff" ? "!" : "-"}</button>

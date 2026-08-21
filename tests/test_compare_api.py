@@ -90,11 +90,14 @@ def test_support_content_alignment_and_validation(tmp_path: Path) -> None:
         payload = response.json()
         assert payload["counts"]["content_diffs"] > 0
         assert payload["first_content_divergence"] is not None
-        if (
-            payload["first_structural_divergence"] is None
-            or payload["first_content_divergence"] < payload["first_structural_divergence"]
-        ):
-            assert payload["first_divergence"]["kind"] == "content"
+        structural = payload["first_structural_divergence"]
+        content = payload["first_content_divergence"]
+        expected = (
+            {"index": structural, "kind": "structural"}
+            if structural is not None
+            else {"index": content, "kind": "content"}
+        )
+        assert payload["first_divergence"] == expected
         assert (await client.get(
             "/api/compare", params={"a": "missing", "b": "case-02"}
         )).status_code == 404

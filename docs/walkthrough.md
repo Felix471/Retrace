@@ -26,7 +26,7 @@
 
 7. Clear filters, select exactly `support-demo-05` and `support-demo-06`, and click **Compare**.
 
-   **EXPECTED:** the banner says **first divergence: structural at pair 6** because `support-demo-06` has an extra retry loop. For a content example, compare `support-demo-01` with `support-demo-02`; the banner says **first divergence: content at pair 0**.
+   **EXPECTED:** the banner says **Runs diverge structurally at pair 6** because `support-demo-06` has an extra retry loop. For a comparison with both kinds, compare `support-demo-01` with `support-demo-02`; the headline says **Runs diverge structurally at pair 13** and the secondary line says **first content difference at pair 0**.
 
 ## Second step: inspect aggregate JSONL and repairs
 

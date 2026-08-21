@@ -148,7 +148,7 @@ class CompareCountsResponse(BaseModel):
 
 
 class FirstDivergenceResponse(BaseModel):
-    """The earliest divergence in the complete alignment."""
+    """The headline divergence: structural when present, otherwise content."""
 
     index: int
     kind: Literal["structural", "content"]
@@ -170,9 +170,15 @@ class CompareResponse(BaseModel):
     run_a: RunResponse
     run_b: RunResponse
     counts: CompareCountsResponse
-    first_structural_divergence: int | None
-    first_content_divergence: int | None
-    first_divergence: FirstDivergenceResponse | None
+    first_structural_divergence: int | None = Field(
+        description="First pair with an event on only one side."
+    )
+    first_content_divergence: int | None = Field(
+        description="First aligned pair whose event content differs."
+    )
+    first_divergence: FirstDivergenceResponse | None = Field(
+        description="Structural divergence when present; otherwise content divergence."
+    )
     pairs: list[AlignedPairResponse]
     total: int
     offset: int

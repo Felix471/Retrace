@@ -54,7 +54,7 @@ class AlignedPair:
 
 @dataclass(frozen=True, slots=True)
 class FirstDivergence:
-    """The earliest divergence in merged-pair order."""
+    """The headline divergence: structural when present, otherwise content."""
 
     index: int
     kind: DivergenceKind
@@ -131,14 +131,10 @@ def align(
         position_b = match.b + match.size
 
     first: FirstDivergence | None = None
-    candidates = (
-        (first_structural, "structural"),
-        (first_content, "content"),
-    )
-    present = [(index, kind) for index, kind in candidates if index is not None]
-    if present:
-        index, kind = min(present, key=lambda candidate: candidate[0])
-        first = FirstDivergence(index=index, kind=kind)
+    if first_structural is not None:
+        first = FirstDivergence(index=first_structural, kind="structural")
+    elif first_content is not None:
+        first = FirstDivergence(index=first_content, kind="content")
 
     return AlignmentResult(
         pairs=tuple(pairs),

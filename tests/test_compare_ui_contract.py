@@ -77,3 +77,5 @@ def test_event_row_is_one_shared_component() -> None:
     compare = source[source.index("class Compare extends Component"):source.index("class Replay extends Component")]
     assert "<${EventRow}" in replay
     assert compare.count("<${EventRow}") == 2
+    assert "compareBannerState(summary)" in compare
+    assert "banner.secondaryIndex" in compare

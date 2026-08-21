@@ -25,6 +25,28 @@ export function previewOf(content, maxLen = 120) {
   return `${flat.slice(0, Math.max(0, maxLen - 3))}...`;
 }
 
+export function compareBannerState(summary) {
+  const structural = summary?.first_structural_divergence;
+  const content = summary?.first_content_divergence;
+  if (structural !== null && structural !== undefined) {
+    return {
+      headline: `Runs diverge structurally at pair ${structural}`,
+      headlineIndex: structural,
+      secondary: content === null || content === undefined ? null : `first content difference at pair ${content}`,
+      secondaryIndex: content ?? null,
+    };
+  }
+  if (content !== null && content !== undefined) {
+    return {
+      headline: `Same structure; first content difference at pair ${content}`,
+      headlineIndex: content,
+      secondary: null,
+      secondaryIndex: null,
+    };
+  }
+  return { headline: "Runs are identical", headlineIndex: null, secondary: null, secondaryIndex: null };
+}
+
 function eventOrdinal(eventId) {
   const value = String(eventId ?? "");
   const separator = value.lastIndexOf(":");

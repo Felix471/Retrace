@@ -65,7 +65,7 @@ def test_totally_disjoint_runs_emit_deletions_then_insertions() -> None:
 
 
 @pytest.mark.parametrize("content_first", [True, False])
-def test_first_divergence_selects_earlier_kind(content_first: bool) -> None:
+def test_first_divergence_prefers_structure(content_first: bool) -> None:
     base = [event(index) for index in range(4)]
     inserted = SyntheticEvent(99, 99, "inserted", "system", "new")
     if content_first:
@@ -76,7 +76,11 @@ def test_first_divergence_selects_earlier_kind(content_first: bool) -> None:
     result = align(base, other)
 
     assert result.first_divergence is not None
-    assert result.first_divergence.kind == ("content" if content_first else "structural")
+    assert result.first_structural_divergence is not None
+    assert (result.first_divergence.index, result.first_divergence.kind) == (
+        result.first_structural_divergence,
+        "structural",
+    )
 
 
 def test_comparators_and_unknown_name() -> None:

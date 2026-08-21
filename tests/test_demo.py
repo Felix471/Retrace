@@ -90,11 +90,19 @@ def test_demo_api_smoke_compare_and_sidecars(tmp_path: Path) -> None:
             for run_id in ("support-demo-03", "support-demo-08", "support-demo-14", "support-demo-25", "support-demo-33"):
                 tags = (await client.get(f"/api/runs/{run_id}/tags")).json()
                 assert len(tags["tags"]) == 1 and tags.get("warning") is None
-            for pair, kind in ((STRUCTURAL_PAIR, "structural"), (CONTENT_PAIR, "content")):
+            for pair in (STRUCTURAL_PAIR, CONTENT_PAIR):
                 compared = (await client.get(
                     "/api/compare", params={"a": pair[0], "b": pair[1], "limit": 2000}
                 )).json()
-                assert compared["first_divergence"]["kind"] == kind
+                structural = compared["first_structural_divergence"]
+                content = compared["first_content_divergence"]
+                expected = (
+                    {"index": structural, "kind": "structural"}
+                    if structural is not None
+                    else {"index": content, "kind": "content"}
+                )
+                assert compared["first_divergence"] == expected
+            assert compared["first_content_divergence"] == 0
 
     asyncio.run(check())
 

@@ -114,6 +114,30 @@ def test_compare_viewport_page_mapping() -> None:
 
 
 @pytest.mark.parametrize(
+    ("summary", "expected"),
+    [
+        (
+            {"first_structural_divergence": 6, "first_content_divergence": 0},
+            {"headline": "Runs diverge structurally at pair 6", "headlineIndex": 6,
+             "secondary": "first content difference at pair 0", "secondaryIndex": 0},
+        ),
+        (
+            {"first_structural_divergence": None, "first_content_divergence": 3},
+            {"headline": "Same structure; first content difference at pair 3", "headlineIndex": 3,
+             "secondary": None, "secondaryIndex": None},
+        ),
+        (
+            {"first_structural_divergence": None, "first_content_divergence": None},
+            {"headline": "Runs are identical", "headlineIndex": None,
+             "secondary": None, "secondaryIndex": None},
+        ),
+    ],
+)
+def test_compare_banner_states(summary: dict[str, int | None], expected: dict[str, object]) -> None:
+    assert _call("compareBannerState", summary) == expected
+
+
+@pytest.mark.parametrize(
     ("status", "mark"),
     [
         ("match", "gutter-match"),
