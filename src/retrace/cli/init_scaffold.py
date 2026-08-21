@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import re
 from collections import Counter
@@ -158,6 +159,28 @@ def _sample_file(path: Path, limit: int) -> list[dict[str, object]]:
     return records
 
 
+def _document_samples(path: Path, limit: int) -> tuple[list[Path], list[dict[str, object]]]:
+    candidates = [path] if path.is_file() else sorted(
+        item for item in path.rglob("*")
+        if item.is_file() and item.suffix.lower() in {".json", ".jsonl"}
+    )
+    files: list[Path] = []
+    records: list[dict[str, object]] = []
+    for candidate in candidates:
+        if _sample_file(candidate, 1):
+            continue
+        try:
+            value = json.loads(candidate.read_text(encoding="utf-8-sig"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            continue
+        if isinstance(value, dict):
+            files.append(candidate)
+            records.append(value)
+            if len(records) >= limit:
+                break
+    return files, records
+
+
 def detect_layout(path: Path, sample: int = 200) -> Layout:
     """Inspect a path read-only and classify its JSONL organization."""
     if sample < 1:
@@ -165,9 +188,26 @@ def detect_layout(path: Path, sample: int = 200) -> Layout:
     if not path.exists():
         raise ScaffoldError(f"{path}: path does not exist")
     files = _jsonl_files(path)
+    sampled = {file: _sample_file(file, sample) for file in files}
+    document_files, documents = _document_samples(path, sample)
+    if documents and not any(sampled.values()):
+        suffixes = {file.suffix.lower() for file in document_files}
+        if path.is_file() or len(document_files) == 1:
+            pattern = document_files[0].name
+        elif len(suffixes) == 1:
+            pattern = f"**/*{next(iter(suffixes))}"
+        else:
+            pattern = "**/*"
+        arrays = tuple(
+            key for key, value in documents[0].items()
+            if isinstance(value, list) and value
+            and (all(isinstance(item, dict) for item in value)
+                 or all(isinstance(item, str) for item in value))
+        )
+        return Layout("json", pattern, tuple(document_files), tuple(documents), arrays)
+
     if not files:
         raise ScaffoldError(f"{path}: no parseable JSONL lines found")
-    sampled = {file: _sample_file(file, sample) for file in files}
     if not any(sampled.values()):
         raise ScaffoldError(f"{path}: no parseable JSONL lines found (empty or binary files)")
 
@@ -317,18 +357,22 @@ def _sniff_lines(records: tuple[dict[str, object], ...]) -> list[str]:
 
 def render_draft(layout: Layout) -> str:
     """Render an ASCII-only, schema-valid YAML mapping with explicit evidence."""
+    heading = ("# Draft mapping generated from sampled JSON document records."
+               if layout.unit == "json"
+               else "# Draft mapping generated from sampled JSONL records.")
+    matched_kind = "JSON document" if layout.unit == "json" else "JSONL file"
     lines = [
-        "# Draft mapping generated from sampled JSONL records.",
+        heading,
         "# Review every evidence comment and resolve TODOs before relying on the data.",
         "retrace_mapping: 1  # required mapping schema version",
         "run_discovery:  # inferred filesystem layout",
-        f"  pattern: {_scalar(layout.pattern)}  # matched {len(layout.files)} JSONL file(s)",
+        f"  pattern: {_scalar(layout.pattern)}  # matched {len(layout.files)} {matched_kind}(s)",
         f"  unit: {layout.unit}  # detected {layout.unit}-based layout",
     ]
     if layout.events_file:
         lines.append(f"  events_file: {_scalar(layout.events_file)}  # common JSONL filename")
     lines.append("run:  # inferred run-level extraction")
-    if layout.unit == "line":
+    if layout.unit in ("line", "json"):
         candidate = unique_id_candidate(list(layout.records))
         run_id = candidate.field if candidate else "@"
         reason = _evidence(candidate) if candidate else "TODO: no unique id found; uses whole record"
@@ -363,20 +407,21 @@ def render_draft(layout: Layout) -> str:
             lines.append(f"    {_scalar(key)}: {_scalar(key)}  # {hits / total * 100:.0f}% of {total} sampled runs")
 
     lines.append("event:  # inferred event extraction")
-    if layout.unit == "line":
+    if layout.unit in ("line", "json"):
         top = layout.records[0]
         agent = _agent_array(top)
         event_arrays = [name for name in layout.arrays if agent is None or name != agent[0]]
         lines.append("  sources:  # object arrays in aggregate records, in source order")
         for priority, name in enumerate(event_arrays):
             records = [item for record in layout.records for item in record.get(name, []) if isinstance(item, dict)]
+            shape = "object array" if records else "string array"
             lines.extend([
-                f"    - name: {_scalar(name)}  # observed object array",
+                f"    - name: {_scalar(name)}  # observed {shape}",
                 f"      path: {_scalar(name)}  # present in sampled aggregate records",
                 "      type: other  # array has no categorical source-level event type",
                 f"      priority: {priority}  # preserves observed array order",
                 "      fields:  # inferred from records in this array",
-                *_field_lines(records, "        "),
+                *(_field_lines(records, "        ") if records else []),
             ])
         lines.append("  merge:  # deterministic merge of array sources")
         lines.append("    sort_by: turn  # best shared ordering slot; missing values remain stable")

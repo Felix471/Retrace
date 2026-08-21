@@ -37,7 +37,7 @@ sniff: {required_fields: [kind, text]}
 | `retrace_mapping` | integer, required; exactly 1 | Mapping schema version. | `retrace_mapping: 1` |
 | `run_discovery` | object, required | Filesystem/run layout settings. | `run_discovery: {...}` |
 | `pattern` | string, required | Relative glob below the input root. Absolute paths and `..` are rejected. | `pattern: "**/*.jsonl"` |
-| `unit` | `file`, `dir`, or `line`; optional, default `file` | One matched file, directory, or JSONL line is one run. Supplying `events_file` implies `dir`. | `unit: line` |
+| `unit` | `file`, `dir`, `line`, or `json`; optional, default `file` | One matched file, directory, JSONL line, or whole JSON document is one run. Supplying `events_file` implies `dir`. | `unit: json` |
 | `events_file` | string, optional; directory only | Event JSONL filename inside each matched run directory. | `events_file: events.jsonl` |
 
 The file layout (`unit: file`) maps every matched JSONL file to a run. The
@@ -45,19 +45,31 @@ directory layout (`unit: dir`) maps every matched directory to a run and reads
 its `events_file`. The line-per-run layout (`unit: line`) maps each JSON object
 line in each matched aggregate file to a run; it requires multi-source events.
 Malformed lines are reported and skipped without aborting other runs.
+The document layout (`unit: json`) parses each matched file as one UTF-8 JSON
+object (an optional BOM is accepted). It requires multi-source events; malformed
+or non-object documents are reported as `path:1` and skipped. For example:
+
+```yaml
+run_discovery: {pattern: "runs/*.json", unit: json}
+run: {id: run_id, metadata: {condition: condition}}
+event:
+  sources:
+    - {name: messages, path: messages, fields: {content: text, role: role}}
+```
 
 ## Run
 
 | Key | Type and presence | Meaning | Short example |
 | --- | --- | --- | --- |
 | `run` | object, required | Run identity and run-level extraction. | `run: {...}` |
-| `id` | string, required | For file/dir layouts, a template using path variables such as `{file_stem}` or `{dir_name}`; for line layout, a JMESPath expression. | `id: "{file_stem}"` |
+| `id` | string, required | For file/dir layouts, a path template; for line/json layouts, a JMESPath expression evaluated against the run record/document. | `id: "{file_stem}"` |
 | `manifest` | string, optional | JSON file relative to a run directory; it becomes the run extraction basis. | `manifest: meta.json` |
 | `metadata` | map of output name to string expression, optional, default empty | Extracts arbitrary filter/group metadata. | `metadata: {model: config.model}` |
 | `outcome` | string expression, optional | Extracts and string-coerces the run outcome. | `outcome: result.status` |
 
 Without a manifest, run fields use the first valid event record (or the complete
-line record for multi-source and line layouts).
+line record for multi-source and line layouts, or the complete JSON document
+for a json layout). `run.manifest` is ignored for line and json layouts.
 
 ## Flat event fields
 

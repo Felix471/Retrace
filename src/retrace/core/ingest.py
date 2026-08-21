@@ -268,8 +268,10 @@ def ingest(
     progress: Progress | None = None,
 ) -> IngestReport:
     """Discover, extract, summarize, and persist runs below *root*."""
-    if config.run_discovery.unit == "line" and config.event.sources is None:
-        raise MappingConfigError("event.sources: sources are required for line units")
+    if config.run_discovery.unit in ("line", "json") and config.event.sources is None:
+        raise MappingConfigError(
+            f"event.sources: sources are required for {config.run_discovery.unit} units"
+        )
 
     report = IngestReport()
     digest = _config_hash(config)
@@ -280,7 +282,7 @@ def ingest(
     existing = {run.id: run for run in store.list_runs()}
     store.meta_set("discovery_unit", config.run_discovery.unit)
 
-    if config.run_discovery.unit == "line":
+    if config.run_discovery.unit in ("line", "json"):
         candidate_files = _line_files(config, root)
         changed_files = [
             path for path in candidate_files
@@ -310,6 +312,26 @@ def ingest(
                 if source.line_no is not None
             }
             store.delete_runs_for_source(source_path)
+            if config.run_discovery.unit == "json":
+                for source in file_sources:
+                    if source.document is None:
+                        continue
+                    run, events, stats = _assemble_sources(
+                        config, source, source.document, experiment_id
+                    )
+                    _merge_stats(report, stats, config)
+                    store.insert_run(run, events)
+                    if source.run_id in old_ids:
+                        report.runs_replaced += 1
+                    else:
+                        report.runs_ingested += 1
+                    index += 1
+                    report.processed_run_ids.append(source.run_id)
+                    if progress is not None:
+                        progress(source.run_id, index, total)
+                stat = file_path.stat()
+                store.set_fingerprint(source_path, stat.st_mtime, stat.st_size)
+                continue
             for line_no, item in iter_jsonl_records(file_path):
                 source = by_line.get(line_no)
                 if source is None or not isinstance(item, dict):

@@ -85,6 +85,17 @@ def _first_record(path: Path) -> dict[str, object] | None:
         return None
 
 
+def _first_document(paths: list[Path]) -> dict[str, object] | None:
+    for path in paths:
+        try:
+            value = json.loads(path.read_text(encoding="utf-8-sig"))
+        except (OSError, UnicodeError, JSONDecodeError):
+            continue
+        if isinstance(value, dict):
+            return value
+    return None
+
+
 def sniff_config(config: MappingConfig, root: Path) -> bool:
     """Test a target using only the signature declared by *config*."""
     if config.sniff is None:
@@ -96,7 +107,8 @@ def sniff_config(config: MappingConfig, root: Path) -> bool:
     candidate = matches[0]
     if discovery.unit == "dir":
         candidate = candidate / str(discovery.events_file)
-    record = _first_record(candidate)
+    record = (_first_document(matches) if discovery.unit == "json"
+              else _first_record(candidate))
     return record is not None and all(
         field in record for field in config.sniff.required_fields
     )

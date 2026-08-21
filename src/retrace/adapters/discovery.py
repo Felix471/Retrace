@@ -24,6 +24,7 @@ __all__ = [
     "discover_runs",
     "discover_runs_with_report",
     "iter_jsonl_records",
+    "load_json_document",
 ]
 
 JsonlRecord: TypeAlias = tuple[int, dict[str, object] | str]
@@ -43,6 +44,7 @@ class RunSource:
     manifest: dict[str, object] | None
     warnings: tuple[str, ...] = ()
     line_no: int | None = None
+    document: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -94,7 +96,7 @@ def _find_candidates(config: MappingConfig, root: Path) -> list[_Candidate]:
     discovery = config.run_discovery
     pattern = discovery.pattern
     _validate_pattern(pattern)
-    if discovery.unit == "line" and root.is_file():
+    if discovery.unit in ("line", "json") and root.is_file():
         return [_Candidate(root, root, root.name)]
     if not root.is_dir():
         raise DiscoveryError(f"{root}: no matches for pattern {pattern!r}")
@@ -111,7 +113,7 @@ def _find_candidates(config: MappingConfig, root: Path) -> list[_Candidate]:
                 stacklevel=3,
             )
             continue
-        if discovery.unit in ("file", "line"):
+        if discovery.unit in ("file", "line", "json"):
             if match.is_file():
                 candidates.append(
                     _Candidate(match, match, _relative_posix(match, root))
@@ -162,6 +164,21 @@ def iter_jsonl_records(path: Path) -> Iterator[JsonlRecord]:
                 yield line_no, "invalid JSON: expected an object"
                 continue
             yield line_no, value
+
+
+def load_json_document(path: Path) -> tuple[dict[str, object] | None, str | None]:
+    """Load one UTF-8 JSON object, returning a recoverable failure reason."""
+    try:
+        value = json.loads(path.read_text(encoding="utf-8-sig"))
+    except UnicodeDecodeError as error:
+        return None, f"invalid UTF-8: {error}"
+    except JSONDecodeError as error:
+        return None, f"invalid JSON: {error.msg}"
+    except OSError as error:
+        return None, f"cannot read JSON: {error}"
+    if not isinstance(value, dict):
+        return None, "invalid JSON: expected an object"
+    return value, None
 
 
 def _render_run_id(template: str, candidate: _Candidate, unit: str) -> str:
@@ -231,7 +248,7 @@ def discover_runs(config: MappingConfig, root: Path) -> list[RunSource]:
     """Resolve the configured file or directory layout beneath *root*."""
 
     unit = config.run_discovery.unit
-    if unit == "line":
+    if unit in ("line", "json"):
         return discover_runs_with_report(config, root).sources
     candidates = _find_candidates(config, root)
     sources: list[RunSource] = []
@@ -252,7 +269,7 @@ def discover_runs(config: MappingConfig, root: Path) -> list[RunSource]:
 def discover_runs_with_report(config: MappingConfig, root: Path) -> DiscoveryReport:
     """Discover runs, retaining recoverable per-line failures in a report."""
 
-    if config.run_discovery.unit != "line":
+    if config.run_discovery.unit not in ("line", "json"):
         return DiscoveryReport(discover_runs(config, root), [], {})
 
     try:
@@ -267,7 +284,16 @@ def discover_runs_with_report(config: MappingConfig, root: Path) -> DiscoveryRep
     used_ids: set[str] = set()
     for candidate in candidates:
         failure_counts[candidate.events_path] = 0
-        for line_no, item in iter_jsonl_records(candidate.events_path):
+        if config.run_discovery.unit == "json":
+            item, failure = load_json_document(candidate.events_path)
+            if failure is not None or item is None:
+                failures.append((candidate.events_path, 1, failure or "invalid JSON"))
+                failure_counts[candidate.events_path] = 1
+                continue
+            records = [(None, item)]
+        else:
+            records = iter_jsonl_records(candidate.events_path)
+        for line_no, item in records:
             if isinstance(item, str):
                 failures.append((candidate.events_path, line_no, item))
                 failure_counts[candidate.events_path] += 1
@@ -284,7 +310,8 @@ def discover_runs_with_report(config: MappingConfig, root: Path) -> DiscoveryRep
 
             source_warnings: tuple[str, ...] = ()
             if fallback_reason is not None:
-                run_id = f"{candidate.events_path.stem}#L{line_no}"
+                run_id = (f"{candidate.events_path.stem}#L{line_no}"
+                          if line_no is not None else candidate.events_path.stem)
                 source_warnings = (
                     _warning(
                         candidate.events_path,
@@ -300,6 +327,7 @@ def discover_runs_with_report(config: MappingConfig, root: Path) -> DiscoveryRep
                     manifest=None,
                     warnings=source_warnings,
                     line_no=line_no,
+                    document=item if config.run_discovery.unit == "json" else None,
                 )
             )
 

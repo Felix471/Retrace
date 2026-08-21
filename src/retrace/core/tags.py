@@ -90,7 +90,7 @@ class TagService:
             raise KeyError(run_id)
         unit = self.store.meta_get("discovery_unit")
         root_value = self.store.meta_get("root_path")
-        if unit not in {"dir", "file", "line"} or root_value is None:
+        if unit not in {"dir", "file", "line", "json"} or root_value is None:
             raise TagPathError("Store is missing valid discovery metadata")
         source = Path(run.source_path)
         target = source.parent / ("retrace.json" if unit == "dir" else f"{source.stem}.retrace.json")

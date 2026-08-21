@@ -28,7 +28,7 @@ VALID_EVENT_TYPES = (
 )
 VALID_REPAIR_STRATEGIES = ("ordinal", "derive")
 
-DiscoveryUnit: TypeAlias = Literal["file", "dir", "line"]
+DiscoveryUnit: TypeAlias = Literal["file", "dir", "line", "json"]
 EventType: TypeAlias = Literal[
     "message",
     "tool_call",
@@ -216,7 +216,7 @@ class RunDiscoveryConfig(_StrictConfigModel):
         if "unit" not in data:
             return {**data, "unit": "dir"}
         unit = data.get("unit")
-        if unit in ("file", "line"):
+        if unit in ("file", "line", "json"):
             raise _located_validation_error(
                 cls.__name__,
                 "events_file_unit_conflict",
