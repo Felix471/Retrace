@@ -77,6 +77,8 @@ class MultiSourceStats(ExtractionStats):
     roster_warning_counts: dict[str, int] = field(
         default_factory=_new_roster_warning_counts
     )
+    roster_matched: int = 0
+    roster_agent_bearing: int = 0
 
     @property
     def source_records(self) -> dict[str, int]:
@@ -367,6 +369,9 @@ class MultiSourceExtractor:
         for candidate in candidates:
             event = candidate.event
             result = table.apply(event.agent_id, event.role, event.metadata)
+            if event.agent_id is not None:
+                self.stats.roster_agent_bearing += 1
+                self.stats.roster_matched += int(result.matched)
             joined.append(
                 replace(
                     candidate,

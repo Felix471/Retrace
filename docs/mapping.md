@@ -180,7 +180,8 @@ failures are counted separately and leave the target absent.
 
 Keys are compared as strings; the first duplicate roster entry wins. A missing
 roster/path or unmatched event agent produces a warning. Joined non-role
-attributes are stored at `metadata._retrace.agent`.
+attributes are stored at `metadata._retrace.agent`. `retrace-logs check` reports
+the roster join match rate.
 
 ## Sniffing
 

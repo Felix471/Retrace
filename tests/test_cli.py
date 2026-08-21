@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import sys
@@ -39,8 +40,18 @@ def test_check_avalon_fixture() -> None:
         "quests.turn (ordinal): fired 3 of 22 records",
         "quests.result (derive): fired 1 of 22 records",
         "Line failures: 0",
+        "Roster join:\n  matched 652 of 652 agent-bearing events (100.0%)",
     ):
         assert expected in result.stdout
+    for run_id in (
+        "1776453329940-bvvf9",
+        "1776470168031-kwy8o",
+        "1776471689022-f5veq",
+        "1776642987532-fob9d",
+        "1776701240615-6ius8",
+    ):
+        line = next(line for line in result.stdout.splitlines() if run_id in line)
+        assert line.endswith("(100.0%)")
 
 
 def test_check_support_fixture() -> None:
@@ -51,6 +62,46 @@ def test_check_support_fixture() -> None:
     assert "100.0%" in result.stdout
     assert "Warnings: 2 total" in result.stdout
     assert "Line failures:" in result.stdout
+    assert "Roster join:" not in result.stdout
+
+
+def test_check_reports_partial_and_missing_roster_matches(tmp_path: Path) -> None:
+    records = [
+        {
+            "id": "partial",
+            "items": [{"actor": f"agent-{index}", "text": "event"} for index in range(5)],
+            "people": [{"id": f"agent-{index}", "role": "member"} for index in range(3)],
+        },
+        {
+            "id": "missing",
+            "items": [{"actor": f"agent-{index}", "text": "event"} for index in range(5)],
+        },
+    ]
+    (tmp_path / "runs.jsonl").write_text(
+        "".join(f"{json.dumps(record)}\n" for record in records), encoding="utf-8"
+    )
+    config = tmp_path / "mapping.yaml"
+    config.write_text(
+        """retrace_mapping: 1
+run_discovery: {pattern: runs.jsonl, unit: line}
+run: {id: id}
+event:
+  sources:
+    - name: neutral
+      path: items
+      fields: {agent_id: actor, content: text}
+agents: {path: people, key: id, attributes: {role: role}}
+""",
+        encoding="ascii",
+    )
+
+    result = _cli("check", tmp_path, "--config", config)
+
+    assert result.returncode == 0, result.stderr
+    assert "partial: 3/5 (60.0%)" in result.stdout
+    assert "missing: 0/5 (0.0%)" in result.stdout
+    assert "matched 3 of 10 agent-bearing events (30.0%)" in result.stdout
+    assert "Warnings: 2 total" in result.stdout
 
 
 def test_check_corrupt_line_is_recoverable(tmp_path: Path) -> None:

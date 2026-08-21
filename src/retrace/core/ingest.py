@@ -42,6 +42,10 @@ class IngestReport:
     repair_rule_counts: dict[tuple[str, str, str], tuple[int, int]] = field(
         default_factory=dict
     )
+    roster_join_by_run: dict[str, tuple[int, int]] = field(default_factory=dict)
+    roster_matched: int = 0
+    roster_agent_bearing: int = 0
+    roster_join_enabled: bool = False
 
     @property
     def ingested(self) -> int:
@@ -58,6 +62,12 @@ class IngestReport:
     @property
     def run_ids(self) -> list[str]:
         return self.processed_run_ids
+
+    def add_roster_join(self, run_id: str, matched: int, agent_bearing: int) -> None:
+        """Add one processed run's roster-join accounting."""
+        self.roster_join_by_run[run_id] = (matched, agent_bearing)
+        self.roster_matched += matched
+        self.roster_agent_bearing += agent_bearing
 
 
 def _config_hash(config: MappingConfig) -> str:
@@ -182,7 +192,7 @@ def _run_extractor(config: MappingConfig) -> Extractor:
 
 def _assemble_sources(
     config: MappingConfig, source: RunSource, record: dict[str, object], experiment_id: str
-) -> tuple[Run, list[Event], ExtractionStats]:
+) -> tuple[Run, list[Event], ExtractionStats, tuple[int, int]]:
     extractor = MultiSourceExtractor(config)
     events = [_event(source.run_id, item) for item in extractor.extract_events(record)]
     run_extractor = _run_extractor(config)
@@ -203,12 +213,13 @@ def _assemble_sources(
              warnings, extractor.stats.n_repaired),
         events,
         extractor.stats,
+        (extractor.stats.roster_matched, extractor.stats.roster_agent_bearing),
     )
 
 
 def _assemble_flat(
     config: MappingConfig, source: RunSource, experiment_id: str
-) -> tuple[Run, list[Event], ExtractionStats]:
+) -> tuple[Run, list[Event], ExtractionStats, tuple[int, int]]:
     extractor = Extractor(config)
     parsed: list[dict[str, object]] = []
     malformed = 0
@@ -227,17 +238,24 @@ def _assemble_flat(
     run_fields = extractor.extract_run_fields(basis)
     if config.agents is not None:
         table = RosterJoin(config.agents).build(basis)
-        events = [
-            replace(event, role=result.role, metadata=result.metadata)
-            for event in events
-            for result in [table.apply(event.agent_id, event.role, event.metadata)]
-        ]
+        joined_events: list[Event] = []
+        matched = 0
+        agent_bearing = 0
+        for event in events:
+            result = table.apply(event.agent_id, event.role, event.metadata)
+            if event.agent_id is not None:
+                agent_bearing += 1
+                matched += int(result.matched)
+            joined_events.append(replace(event, role=result.role, metadata=result.metadata))
+        events = joined_events
         join_warnings = table.warnings.total
     else:
+        matched = 0
+        agent_bearing = 0
         join_warnings = 0
     warnings = extractor.stats.total_warnings + malformed + join_warnings
     return (_run(source, experiment_id, events, run_fields.metadata, run_fields.outcome,
-                 warnings, 0), events, extractor.stats)
+                 warnings, 0), events, extractor.stats, (matched, agent_bearing))
 
 
 def _first_record(path: Path) -> dict[str, object]:
@@ -251,15 +269,17 @@ def _process(
     config: MappingConfig,
     sources: Iterable[RunSource],
     experiment_id: str,
-) -> list[tuple[RunSource, Run, list[Event], ExtractionStats]]:
+) -> list[tuple[RunSource, Run, list[Event], ExtractionStats, tuple[int, int]]]:
     result = []
     for source in sources:
         if config.event.sources is not None:
             record = _first_record(source.events_path)
-            run, events, stats = _assemble_sources(config, source, record, experiment_id)
+            run, events, stats, join_counts = _assemble_sources(
+                config, source, record, experiment_id
+            )
         else:
-            run, events, stats = _assemble_flat(config, source, experiment_id)
-        result.append((source, run, events, stats))
+            run, events, stats, join_counts = _assemble_flat(config, source, experiment_id)
+        result.append((source, run, events, stats, join_counts))
     return result
 
 
@@ -278,7 +298,7 @@ def ingest(
             f"event.sources: sources are required for {config.run_discovery.unit} units"
         )
 
-    report = IngestReport()
+    report = IngestReport(roster_join_enabled=config.agents is not None)
     digest = _config_hash(config)
     old_digest = store.meta_get("config_hash")
     report.config_hash_warning = old_digest is not None and old_digest != digest
@@ -327,7 +347,7 @@ def ingest(
                 for source in file_sources:
                     if source.document is None:
                         continue
-                    run, events, stats = _assemble_sources(
+                    run, events, stats, join_counts = _assemble_sources(
                         config, source, source.document, experiment_id
                     )
                     _merge_stats(report, stats, config)
@@ -343,6 +363,8 @@ def ingest(
                         report.runs_ingested += 1
                     index += 1
                     report.processed_run_ids.append(source.run_id)
+                    if config.agents is not None:
+                        report.add_roster_join(source.run_id, *join_counts)
                     if progress is not None:
                         progress(source.run_id, index, total)
                 stat = file_path.stat()
@@ -352,7 +374,9 @@ def ingest(
                 source = by_line.get(line_no)
                 if source is None or not isinstance(item, dict):
                     continue
-                run, events, stats = _assemble_sources(config, source, item, experiment_id)
+                run, events, stats, join_counts = _assemble_sources(
+                    config, source, item, experiment_id
+                )
                 _merge_stats(report, stats, config)
                 try:
                     store.insert_run(run, events)
@@ -366,6 +390,8 @@ def ingest(
                     report.runs_ingested += 1
                 index += 1
                 report.processed_run_ids.append(source.run_id)
+                if config.agents is not None:
+                    report.add_roster_join(source.run_id, *join_counts)
                 if progress is not None:
                     progress(source.run_id, index, total)
             stat = file_path.stat()
@@ -398,7 +424,7 @@ def ingest(
         old_ids = {run.id for run in existing.values() if run.source_path == path}
         store.delete_runs_for_source(path)
         assembled = _process(config, file_sources, experiment_id)
-        for source, run, events, stats in assembled:
+        for source, run, events, stats, join_counts in assembled:
             _merge_stats(report, stats, config)
             store.insert_run(run, events)
             if source.run_id in old_ids:
@@ -407,6 +433,8 @@ def ingest(
                 report.runs_ingested += 1
             index += 1
             report.processed_run_ids.append(source.run_id)
+            if config.agents is not None:
+                report.add_roster_join(source.run_id, *join_counts)
             if progress is not None:
                 progress(source.run_id, index, total)
         stat = Path(path).stat()

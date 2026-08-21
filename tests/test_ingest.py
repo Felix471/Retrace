@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from retrace.adapters.mapping_schema import MappingConfigError, validate_mapping_config
-from retrace.core.ingest import ingest
+from retrace.core.ingest import IngestReport, ingest
 from retrace.core.store import SqliteStore
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
@@ -59,6 +59,8 @@ def test_flat_ingest_summaries_roster_fallback_and_incremental(tmp_path: Path) -
         first = ingest(config, tmp_path, store)
         run = store.get_run("case-one")
         assert first.runs_ingested == 1
+        assert first.roster_join_by_run == {"case-one": (2, 2)}
+        assert (first.roster_matched, first.roster_agent_bearing) == (2, 2)
         assert run is not None
         assert (run.n_events, run.n_turns, run.tokens_in, run.tokens_out) == (2, 2, 7, 10)
         assert run.total_cost == pytest.approx(0.3)
@@ -77,6 +79,15 @@ def test_flat_ingest_summaries_roster_fallback_and_incremental(tmp_path: Path) -
 
         full = ingest(config, tmp_path, store, reingest=True)
         assert full.runs_replaced == 1
+
+
+def test_ingest_report_aggregates_roster_join_counts() -> None:
+    report = IngestReport()
+    report.add_roster_join("run-a", 3, 5)
+    report.add_roster_join("run-b", 2, 4)
+
+    assert report.roster_join_by_run == {"run-a": (3, 5), "run-b": (2, 4)}
+    assert (report.roster_matched, report.roster_agent_bearing) == (5, 9)
 
 
 def test_flat_ingest_rejects_non_finite_cost_with_warning(tmp_path: Path) -> None:

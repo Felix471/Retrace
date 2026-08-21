@@ -78,6 +78,22 @@ def _print_report(
         if rate is not None:
             print(f"  {_ascii(path)}: {rate:.1f}% ({counter.hits}/{total})")
     print(f"Warnings: {warning_count} total")
+    if report.roster_join_enabled:
+        total = report.roster_agent_bearing
+        rate = None if total == 0 else 100 * report.roster_matched / total
+        aggregate = "n/a" if rate is None else f"{rate:.1f}%"
+        print("Roster join:")
+        print(
+            f"  matched {report.roster_matched} of {total} "
+            f"agent-bearing events ({aggregate})"
+        )
+        items = list(report.roster_join_by_run.items())
+        for run_id, (matched, agent_bearing) in items[:20]:
+            run_rate = None if agent_bearing == 0 else 100 * matched / agent_bearing
+            percentage = "n/a" if run_rate is None else f"{run_rate:.1f}%"
+            print(f"  {_ascii(run_id)}: {matched}/{agent_bearing} ({percentage})")
+        if len(items) > 20:
+            print(f"  (+{len(items) - 20} more)")
     print(f"Repaired: {sum(run.n_repaired for run in runs)} total")
     print("Repair rules:")
     if report.repair_rule_counts:
