@@ -18,6 +18,12 @@ README_VERDICT = (
     "tested against real AG2 and HyperAgent traces from the MAST corpus (config-only); "
     "free-text logs are out of scope in v1."
 )
+README_LOCAL_PROMISE = (
+    "Retrace makes zero outbound network requests. It binds 127.0.0.1, serves only your "
+    "own browser, reads your logs, and writes only *.retrace.json sidecars next to them "
+    "plus its own cache in your user cache directory. Any data leaving the machine can "
+    "only be a user-initiated explicit job - and none exist in v1."
+)
 
 
 def _schema_keys() -> set[str]:
@@ -40,6 +46,11 @@ def test_mapping_reference_covers_every_schema_key() -> None:
 def test_readme_has_owner_verdict_verbatim() -> None:
     text = (ROOT / "README.md").read_text(encoding="ascii")
     assert README_VERDICT in text
+
+
+def test_readme_has_local_privacy_promise_verbatim() -> None:
+    text = (ROOT / "README.md").read_text(encoding="ascii")
+    assert README_LOCAL_PROMISE in text
 
 
 def test_readme_quickstart_check_command_executes() -> None:

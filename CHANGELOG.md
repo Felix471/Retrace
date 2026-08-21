@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog, and this project adheres to
 Semantic Versioning.
 
+## [Unreleased]
+
+### Added
+
+- Added `unit: json` discovery (D28), where each JSON document file is one run, as found by the MAST release gate.
+- Added the D27 presentation rule and doc lint in `scripts/check_docs_presentation.py`, enforced in CI.
+- Added the text-log preprocessing recipe in `docs/mapping.md` and a lint rule rejecting arbitrary-log claims.
+- Added a local-only, gitignored bilingual analysis playbook as development tooling; it is not shipped.
+
+### Changed
+
+- Corrected D29 claims to "structured logs (JSON/JSONL, any layout)" and updated the README verdict line.
+
+### Fixed
+
+- Made duplicate run IDs robust for JSON and line units (T33b) with warned relative-path fallback IDs so ingest never crashes, as found during the gate re-run.
+
 ## [0.1.0] - 2026-08-20
 
 ### Added

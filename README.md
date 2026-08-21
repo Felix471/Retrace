@@ -8,6 +8,14 @@ tested against real AG2 and HyperAgent traces from the MAST corpus (config-only)
 
 See the [changelog](CHANGELOG.md) for release notes.
 
+## Why local
+
+Retrace makes zero outbound network requests. It binds 127.0.0.1, serves only your own browser, reads your logs, and writes only *.retrace.json sidecars next to them plus its own cache in your user cache directory. Any data leaving the machine can only be a user-initiated explicit job - and none exist in v1.
+
+- Inputs are parsed read-only and never executed; scripts shipped with a dataset are never run.
+- The cache holds parsed copies of your logs in the user cache directory; delete it to remove them.
+- Sidecars hold your tag notes.
+
 ## Install
 
 PyPI publication has not happened. From a checkout, install the `retrace-logs`
