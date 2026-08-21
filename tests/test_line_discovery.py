@@ -74,6 +74,22 @@ def test_missing_and_duplicate_ids_use_fallback(tmp_path: Path) -> None:
     assert "duplicate run id" in sources[2].warnings[0]
 
 
+def test_same_line_fallback_colliding_across_directories_uses_relative_path(
+    tmp_path: Path,
+) -> None:
+    for directory in ("alpha", "beta"):
+        target = tmp_path / directory / "runs.jsonl"
+        target.parent.mkdir()
+        target.write_text('{"other":1}\n', encoding="utf-8")
+    sources = discover_runs_with_report(
+        _config(pattern="**/*.jsonl", run_id="id"), tmp_path
+    ).sources
+    assert [source.run_id for source in sources] == [
+        "runs#L1", "beta/runs#L1"
+    ]
+    assert [len(source.warnings) for source in sources] == [1, 1]
+
+
 def test_lf_and_crlf_are_equivalent(tmp_path: Path) -> None:
     content = b'{"id":1}\n{"id":2}\n'
     (tmp_path / "lf.jsonl").write_bytes(content)

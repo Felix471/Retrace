@@ -45,6 +45,7 @@ directory layout (`unit: dir`) maps every matched directory to a run and reads
 its `events_file`. The line-per-run layout (`unit: line`) maps each JSON object
 line in each matched aggregate file to a run; it requires multi-source events.
 Malformed lines are reported and skipped without aborting other runs.
+Null, non-scalar, or duplicate IDs fall back to `file_stem#Lnumber` (then relative path) for line units and the extensionless relative POSIX path for JSON units.
 The document layout (`unit: json`) parses each matched file as one UTF-8 JSON
 object (an optional BOM is accepted). It requires multi-source events; malformed
 or non-object documents are reported as `path:1` and skipped. For example:

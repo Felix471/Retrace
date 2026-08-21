@@ -239,6 +239,30 @@ def test_line_ingest_streams_twice_and_inserts_in_physical_order(
     assert inserted == report.processed_run_ids == expected
 
 
+def test_line_ingest_disambiguates_same_id_and_stem_across_files(tmp_path: Path) -> None:
+    for directory in ("alpha", "beta"):
+        target = tmp_path / directory / "runs.jsonl"
+        target.parent.mkdir()
+        target.write_text(
+            json.dumps({"id": "shared", "items": [{"text": directory}]}) + "\n",
+            encoding="utf-8",
+        )
+    config = validate_mapping_config({
+        "retrace_mapping": 1,
+        "run_discovery": {"pattern": "**/*.jsonl", "unit": "line"},
+        "run": {"id": "id"},
+        "event": {"sources": [
+            {"name": "neutral", "path": "items", "fields": {"content": "text"}},
+        ]},
+    })
+
+    with SqliteStore(":memory:") as store:
+        report = ingest(config, tmp_path, store)
+        assert report.runs_ingested == 2
+        assert [run.id for run in store.list_runs()] == ["runs#L1", "shared"]
+        assert store.experiment_summary()[2] == 1
+
+
 def test_support_fixture_hand_computed_summary_and_malformed(tmp_path: Path) -> None:
     config = validate_mapping_config({
         "retrace_mapping": 1,

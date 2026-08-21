@@ -103,6 +103,49 @@ def test_ingest_incremental_sniff_init_and_tags(tmp_path: Path, monkeypatch: pyt
         assert (second.runs_skipped_unchanged, second.runs_ingested) == (2, 0)
 
 
+def test_duplicate_ids_across_json_files_use_relative_paths_and_check_warns(
+    tmp_path: Path,
+) -> None:
+    for directory in ("alpha", "beta", "gamma"):
+        target = tmp_path / directory / "same.json"
+        target.parent.mkdir()
+        _write(target, {"run_id": "shared", "entries": []})
+    config = _config("**/*.json")
+
+    discovery = discover_runs_with_report(config, tmp_path)
+    assert [source.run_id for source in discovery.sources] == [
+        "shared", "beta/same", "gamma/same"
+    ]
+    assert sum(len(source.warnings) for source in discovery.sources) == 2
+
+    with SqliteStore(":memory:") as store:
+        first = ingest(config, tmp_path, store)
+        assert first.runs_ingested == 3
+        assert len(store.list_runs()) == 3
+        assert store.experiment_summary()[2] == 2
+        second = ingest(config, tmp_path, store)
+        assert (second.runs_skipped_unchanged, second.runs_ingested) == (3, 0)
+
+    mapping = tmp_path / "mapping.yaml"
+    mapping.write_text(yaml.safe_dump(_raw("**/*.json"), sort_keys=False), encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, "-m", "retrace.cli", "check", str(tmp_path), "--config", str(mapping)],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0
+    assert "Warnings: 2 total" in result.stdout
+
+
+def test_null_json_id_uses_relative_path_fallback(tmp_path: Path) -> None:
+    target = tmp_path / "nested" / "record.json"
+    target.parent.mkdir()
+    _write(target, {"run_id": None, "entries": []})
+    source = discover_runs_with_report(_config("**/*.json"), tmp_path).sources[0]
+    assert source.run_id == "nested/record"
+    assert len(source.warnings) == 1
+    assert "original id None" in source.warnings[0]
+
+
 @pytest.mark.parametrize(
     ("name", "count", "source", "fields"),
     [
@@ -131,6 +174,30 @@ def test_local_samples(name: str, count: int, source: str, fields: dict[str, str
         else:
             assert [event.ordinal for event in events] == list(range(count))
             assert events[0].content
+
+
+def test_local_ag2_full_tree_duplicate_ids() -> None:
+    root = REPO_ROOT / "reference-logs" / "mast" / "MAST" / "traces" / "AG2"
+    if not root.exists():
+        pytest.skip(f"local AG2 tree missing: {root}")
+    raw = {
+        "retrace_mapping": 1,
+        "run_discovery": {"pattern": "**/*.json", "unit": "json"},
+        "run": {"id": "instance_id"},
+        "event": {"sources": [{"name": "trace", "path": "trajectory", "fields": {}}]},
+    }
+    original_ids = {
+        str(json.loads(path.read_text(encoding="utf-8-sig"))["instance_id"])
+        for path in root.glob("**/*.json")
+    }
+    with SqliteStore(":memory:") as store:
+        report = ingest(validate_mapping_config(raw), root, store)
+        runs = store.list_runs()
+        assert len(runs) == 7_184
+        assert len(original_ids) == 200
+        assert sum(run.ingest_warnings for run in runs) == 7_184 - 200
+        assert report.line_failures == []
+        assert store.get_run(next(iter(original_ids))) is not None
 
 
 def test_cli_prints_document_failure(tmp_path: Path) -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 from collections import defaultdict
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
@@ -192,7 +193,11 @@ def _assemble_sources(
         target.hits += counter.hits
         target.misses += counter.misses
         target.failures += counter.failures
-    warnings = extractor.stats.total_warnings + run_extractor.stats.total_warnings
+    warnings = (
+        extractor.stats.total_warnings
+        + run_extractor.stats.total_warnings
+        + len(source.warnings)
+    )
     return (
         _run(source, experiment_id, events, fields.metadata, fields.outcome,
              warnings, extractor.stats.n_repaired),
@@ -293,12 +298,18 @@ def ingest(
         report.runs_skipped_unchanged = sum(
             run.source_path in unchanged for run in existing.values()
         )
-        discoveries = []
-        for path in changed_files:
-            discovery = discover_runs_with_report(config, path)
-            discoveries.append((path, discovery.sources))
-            report.line_failures.extend(discovery.line_failures)
-            report.per_file_line_failures.update(discovery.per_file_failure_counts)
+        unchanged_ids = {
+            run.id for run in existing.values() if run.source_path in unchanged
+        }
+        discovery = discover_runs_with_report(
+            config, root, include_paths=changed_files, reserved_ids=unchanged_ids
+        )
+        report.line_failures.extend(discovery.line_failures)
+        report.per_file_line_failures.update(discovery.per_file_failure_counts)
+        sources_by_file: dict[Path, list[RunSource]] = defaultdict(list)
+        for source in discovery.sources:
+            sources_by_file[source.events_path].append(source)
+        discoveries = [(path, sources_by_file[path]) for path in changed_files]
         total = sum(len(sources) for _, sources in discoveries)
         index = 0
         for file_path, file_sources in discoveries:
@@ -320,7 +331,12 @@ def ingest(
                         config, source, source.document, experiment_id
                     )
                     _merge_stats(report, stats, config)
-                    store.insert_run(run, events)
+                    try:
+                        store.insert_run(run, events)
+                    except sqlite3.IntegrityError as error:
+                        report.line_failures.append((file_path, 1, f"store rejected run {source.run_id!r}: {error}"))
+                        report.per_file_line_failures[file_path] = report.per_file_line_failures.get(file_path, 0) + 1
+                        continue
                     if source.run_id in old_ids:
                         report.runs_replaced += 1
                     else:
@@ -338,7 +354,12 @@ def ingest(
                     continue
                 run, events, stats = _assemble_sources(config, source, item, experiment_id)
                 _merge_stats(report, stats, config)
-                store.insert_run(run, events)
+                try:
+                    store.insert_run(run, events)
+                except sqlite3.IntegrityError as error:
+                    report.line_failures.append((file_path, line_no, f"store rejected run {source.run_id!r}: {error}"))
+                    report.per_file_line_failures[file_path] = report.per_file_line_failures.get(file_path, 0) + 1
+                    continue
                 if source.run_id in old_ids:
                     report.runs_replaced += 1
                 else:

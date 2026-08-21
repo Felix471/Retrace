@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import warnings
-from collections.abc import Iterator
+from collections.abc import Collection, Iterator
 from dataclasses import dataclass, replace
 from json import JSONDecodeError
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -266,7 +266,18 @@ def discover_runs(config: MappingConfig, root: Path) -> list[RunSource]:
     return _make_ids_unique(sources)
 
 
-def discover_runs_with_report(config: MappingConfig, root: Path) -> DiscoveryReport:
+def _path_fallback(candidate: _Candidate, line_no: int | None) -> str:
+    base = PurePosixPath(candidate.relative_path).with_suffix("").as_posix()
+    return base if line_no is None else f"{base}#L{line_no}"
+
+
+def discover_runs_with_report(
+    config: MappingConfig,
+    root: Path,
+    *,
+    include_paths: Collection[Path] | None = None,
+    reserved_ids: Collection[str] = (),
+) -> DiscoveryReport:
     """Discover runs, retaining recoverable per-line failures in a report."""
 
     if config.run_discovery.unit not in ("line", "json"):
@@ -278,10 +289,16 @@ def discover_runs_with_report(config: MappingConfig, root: Path) -> DiscoveryRep
         raise MappingConfigError(f"run.id: invalid JMESPath expression: {error}") from error
 
     candidates = _find_candidates(config, root)
+    if include_paths is not None:
+        included = {path.resolve() for path in include_paths}
+        candidates = [
+            candidate for candidate in candidates
+            if candidate.events_path.resolve() in included
+        ]
     sources: list[RunSource] = []
     failures: list[tuple[Path, int, str]] = []
     failure_counts: dict[Path, int] = {}
-    used_ids: set[str] = set()
+    used_ids: set[str] = set(reserved_ids)
     for candidate in candidates:
         failure_counts[candidate.events_path] = 0
         if config.run_discovery.unit == "json":
@@ -300,6 +317,7 @@ def discover_runs_with_report(config: MappingConfig, root: Path) -> DiscoveryRep
                 continue
 
             value = id_expression.search(item)
+            original_id = value
             fallback_reason: str | None = None
             if value is None or isinstance(value, (dict, list)):
                 fallback_reason = "run id is null or non-scalar"
@@ -310,12 +328,22 @@ def discover_runs_with_report(config: MappingConfig, root: Path) -> DiscoveryRep
 
             source_warnings: tuple[str, ...] = ()
             if fallback_reason is not None:
-                run_id = (f"{candidate.events_path.stem}#L{line_no}"
-                          if line_no is not None else candidate.events_path.stem)
+                if line_no is None:
+                    run_id = _path_fallback(candidate, None)
+                else:
+                    run_id = f"{candidate.events_path.stem}#L{line_no}"
+                    if run_id in used_ids:
+                        run_id = _path_fallback(candidate, line_no)
+                base_id = run_id
+                suffix = 2
+                while run_id in used_ids:
+                    run_id = f"{base_id}~{suffix}"
+                    suffix += 1
                 source_warnings = (
                     _warning(
                         candidate.events_path,
-                        f"{fallback_reason}; using fallback id {run_id!r}",
+                        f"{fallback_reason} (original id {original_id!r}); "
+                        f"using fallback id {run_id!r}",
                     ),
                 )
             used_ids.add(run_id)
@@ -331,4 +359,4 @@ def discover_runs_with_report(config: MappingConfig, root: Path) -> DiscoveryRep
                 )
             )
 
-    return DiscoveryReport(_make_ids_unique(sources), failures, failure_counts)
+    return DiscoveryReport(sources, failures, failure_counts)
