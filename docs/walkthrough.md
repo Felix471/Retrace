@@ -27,3 +27,19 @@
 7. Clear filters, select exactly `support-demo-05` and `support-demo-06`, and click **Compare**.
 
    **EXPECTED:** the banner says **first divergence: structural at pair 6** because `support-demo-06` has an extra retry loop. For a content example, compare `support-demo-01` with `support-demo-02`; the banner says **first divergence: content at pair 0**.
+
+## Second step: inspect aggregate JSONL and repairs
+
+After completing the demo tour, run `retrace-logs view fixtures/avalon_mini`.
+This fixture demonstrates the LINE-PER-RUN layout: five runs come from one
+aggregate JSONL file, and each run id is the per-line `gameId` value. The viewer
+shows 5 runs and 652 events.
+
+It also makes repairs visible. In game 8, the run whose id ends in `kwy8o` shows
+the banner **1 records repaired in this run**. Its repaired event has a
+**repaired** badge; expand it to see the original values under **Provenance**:
+turn 4 is shown as 5, and result `fail` is shown as `success`. The run whose id
+ends in `6ius8` shows **2 records repaired in this run**.
+
+Run `retrace-logs check fixtures/avalon_mini` to see the repair-rule fire
+counts: `ordinal` fired 3 and `derive` fired 1.

@@ -50,8 +50,9 @@ retrace-logs check path/to/logs
 retrace-logs view path/to/logs
 ```
 
-See the [mapping reference](docs/mapping.md), [Python adapter protocol](docs/adapters.md),
-and [tagging guide](docs/tagging.md).
+See the [mapping reference](docs/mapping.md), Python adapter protocol (a typed
+extension seam; custom Python adapters are not loadable in v1 - see
+[docs/adapters.md](docs/adapters.md)), and [tagging guide](docs/tagging.md).
 
 Screenshots: pending (the project owner will capture them).
 
