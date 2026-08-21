@@ -1,13 +1,15 @@
-# Status: requires gap G1
-# Scalar trajectory entries are retained as JSON-rendered event content today.
+# Status: works today
+# Scalar trajectory entries use the content fallback and carry no agent or role.
+# Keep other_data.patch, but exclude the large hints_text prose from metadata.
 retrace_mapping: 1
 run_discovery:
   pattern: HyperAgent/*.json
-  unit: file
+  unit: json
 run:
-  id: "{file_stem}"
+  id: instance_id
   metadata:
     instance_id: instance_id
+    patch: other_data.patch
 event:
   sources:
     - name: trajectory
@@ -20,4 +22,7 @@ event:
 sniff:
   required_fields:
     - instance_id
+    - problem_statement
+    - other_data
     - trajectory
+    - note

@@ -4,12 +4,25 @@ from pathlib import Path
 
 import pytest
 
-from retrace.adapters.discovery import iter_jsonl_records
 from retrace.adapters.mapping_schema import load_mapping_config
+from retrace.adapters.registry import sniff_config
+from retrace.core.ingest import ingest
+from retrace.core.store import SqliteStore
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIGS = ROOT / "gate" / "configs"
 CORPUS = ROOT / "reference-logs" / "mast" / "MAST" / "traces"
+
+
+def _with_pattern(config_name: str, pattern: str):
+    config = load_mapping_config(CONFIGS / config_name)
+    return config.model_copy(
+        update={
+            "run_discovery": config.run_discovery.model_copy(
+                update={"pattern": pattern}
+            )
+        }
+    )
 
 
 @pytest.mark.parametrize("path", sorted(CONFIGS.glob("*.yaml")), ids=lambda p: p.stem)
@@ -20,18 +33,84 @@ def test_gate_config_loads(path: Path) -> None:
 
 
 @pytest.mark.skipif(not CORPUS.exists(), reason="local survey corpus is absent")
-@pytest.mark.parametrize(
-    "relative",
-    [
-        "AG2/02da9c1f-7c36-5739-b723-33a7d4f8e7e7_human.json",
-        "HyperAgent/astropy__astropy-14182.json",
-    ],
-)
-def test_g1_layout_is_not_a_jsonl_event_stream(relative: str) -> None:
-    records = list(iter_jsonl_records(CORPUS / relative))
+def test_ag2_config_ingests_native_top_level_tree() -> None:
+    config = load_mapping_config(CONFIGS / "ag2.yaml")
 
-    assert records
-    assert not any(isinstance(value, dict) for _, value in records)
+    assert sniff_config(config, CORPUS)
+    with SqliteStore(":memory:") as store:
+        report = ingest(config, CORPUS, store)
+        runs = store.list_runs()
+        event_count = store.experiment_summary()[1]
+        roles = {
+            event.role
+            for run in runs
+            for event in store.get_events(run.id, limit=10_000)[0]
+        }
+
+    assert len(runs) == 38
+    assert event_count > 0
+    assert roles - {None}
+    assert report.line_failures == []
+    assert not any(report.per_file_line_failures.values())
+
+
+@pytest.mark.skipif(not CORPUS.exists(), reason="local survey corpus is absent")
+def test_ag2_config_ingests_bounded_experiment_sample() -> None:
+    experiment = min((CORPUS / "AG2" / "experiments").iterdir())
+    paths = sorted(experiment.glob("*.json"))[:50]
+    config = _with_pattern("ag2.yaml", "*.json")
+
+    assert len(paths) == 50
+    assert sniff_config(config, experiment)
+    with SqliteStore(":memory:") as store:
+        reports = [ingest(config, path, store) for path in paths]
+        runs = store.list_runs()
+        event_count = store.experiment_summary()[1]
+        roles = {
+            event.role
+            for run in runs
+            for event in store.get_events(run.id, limit=10_000)[0]
+        }
+
+    assert len(runs) == 50
+    assert event_count > 0
+    assert roles - {None}
+    assert all(report.line_failures == [] for report in reports)
+    assert all(not any(report.per_file_line_failures.values()) for report in reports)
+
+
+@pytest.mark.skipif(not CORPUS.exists(), reason="local survey corpus is absent")
+def test_ag2_duplicate_ids_across_experiments_fall_back_without_failure() -> None:
+    experiments = sorted((CORPUS / "AG2" / "experiments").iterdir())[:2]
+    prefix = experiments[0].name[:-1]
+    suffixes = "".join(experiment.name[-1] for experiment in experiments)
+    pattern = f"experiments/{prefix}[{suffixes}]/*.json"
+    config = _with_pattern("ag2.yaml", pattern)
+
+    with SqliteStore(":memory:") as store:
+        report = ingest(config, CORPUS / "AG2", store)
+        runs = store.list_runs()
+
+    assert len(runs) == 400
+    assert sum(run.ingest_warnings - run.n_repaired for run in runs) == 200
+    assert report.line_failures == []
+
+
+@pytest.mark.skipif(not CORPUS.exists(), reason="local survey corpus is absent")
+def test_hyperagent_config_ingests_bounded_native_sample() -> None:
+    config = load_mapping_config(CONFIGS / "hyperagent.yaml")
+    paths = sorted((CORPUS / "HyperAgent").glob("*.json"))[:10]
+
+    assert len(paths) == 10
+    assert sniff_config(config, CORPUS)
+    with SqliteStore(":memory:") as store:
+        reports = [ingest(config, path, store) for path in paths]
+        run_count, event_count, _ = store.experiment_summary()
+
+    assert run_count == 10
+    assert event_count > 0
+    assert all(report.line_failures == [] for report in reports)
+    assert all(not any(report.per_file_line_failures.values()) for report in reports)
 
 
 @pytest.mark.skipif(not CORPUS.exists(), reason="local survey corpus is absent")
@@ -49,7 +128,20 @@ def test_g1_layout_is_not_a_jsonl_event_stream(relative: str) -> None:
     ],
 )
 def test_g2_layout_has_no_json_object_events(relative: str) -> None:
+    from retrace.adapters.discovery import iter_jsonl_records
+
     records = list(iter_jsonl_records(CORPUS / relative))
 
     assert records
     assert any(isinstance(value, str) for _, value in records)
+
+
+def test_gate_report_preserves_initial_and_post_g1_verdicts() -> None:
+    report = (ROOT / "GATE_REPORT.md").read_text(encoding="ascii")
+
+    assert "Result: 0/7 native framework layouts ingest faithfully" in report
+    assert "## 6. After G1" in report
+    assert (
+        "Owner verdict: tested against real AG2 and HyperAgent traces from the MAST "
+        "corpus (config-only); free-text logs are out of scope in v1."
+    ) in report

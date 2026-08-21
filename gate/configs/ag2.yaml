@@ -1,10 +1,10 @@
-# Status: requires gap G1
+# Status: works today
 retrace_mapping: 1
 run_discovery:
   pattern: AG2/*.json
-  unit: file
+  unit: json
 run:
-  id: "{file_stem}"
+  id: instance_id
   metadata:
     instance_id: instance_id
     correct: other_data.correct
@@ -17,7 +17,7 @@ event:
       fields:
         agent_id: name
         role: role
-        content: content
+        content: "join('\n', content)"
         metadata: rest
       repairs:
         - field: turn
@@ -26,4 +26,7 @@ event:
 sniff:
   required_fields:
     - instance_id
+    - problem_statement
+    - other_data
     - trajectory
+    - note
