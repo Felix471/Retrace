@@ -36,6 +36,7 @@ def test_wheel_contents_and_vendor_licenses(built_wheel: Path) -> None:
     with zipfile.ZipFile(built_wheel) as archive:
         names = set(archive.namelist())
         required = {
+            "retrace/adapters/builtin/ag2.yaml",
             "retrace/ui/index.html",
             "retrace/ui/app.js",
             "retrace/ui/logic.js",

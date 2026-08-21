@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from retrace.adapters.mapping_schema import load_mapping_config
-from retrace.adapters.registry import sniff_config
+from retrace.adapters.registry import load_builtin, sniff_config
 from retrace.core.ingest import ingest
 from retrace.core.store import SqliteStore
 
@@ -34,11 +34,11 @@ def test_gate_config_loads(path: Path) -> None:
 
 @pytest.mark.skipif(not CORPUS.exists(), reason="local survey corpus is absent")
 def test_ag2_config_ingests_native_top_level_tree() -> None:
-    config = load_mapping_config(CONFIGS / "ag2.yaml")
+    config, _ = load_builtin("ag2")
 
-    assert sniff_config(config, CORPUS)
+    assert sniff_config(config, CORPUS / "AG2")
     with SqliteStore(":memory:") as store:
-        report = ingest(config, CORPUS, store)
+        report = ingest(config, CORPUS / "AG2", store)
         runs = store.list_runs()
         event_count = store.experiment_summary()[1]
         roles = {

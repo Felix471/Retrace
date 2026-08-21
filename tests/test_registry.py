@@ -14,9 +14,12 @@ from retrace.adapters.registry import (
     resolve_config,
     sniff_config,
 )
+from retrace.core.ingest import ingest
+from retrace.core.store import SqliteStore
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = REPO_ROOT / "fixtures"
+AG2_SAMPLE = REPO_ROOT / "reference-logs" / "mast" / "MAST" / "traces" / "AG2"
 
 
 def _write_config(path: Path, *, sniff: bool = False) -> None:
@@ -40,9 +43,28 @@ def test_builtin_loads_as_packaged_resource() -> None:
 
 
 def test_resolution_disambiguates_builtins_in_deterministic_order() -> None:
-    assert builtin_names() == ("avalon", "support_pipeline")
+    assert builtin_names() == ("ag2", "avalon", "support_pipeline")
     assert resolve_config(FIXTURES / "avalon_mini")[1] == "builtin:avalon"
     assert resolve_config(FIXTURES / "support_pipeline")[1] == "builtin:support_pipeline"
+    ag2, _ = load_builtin("ag2")
+    avalon, _ = load_builtin("avalon")
+    support, _ = load_builtin("support_pipeline")
+    assert not sniff_config(ag2, FIXTURES / "avalon_mini")
+    assert not sniff_config(ag2, FIXTURES / "support_pipeline")
+    if AG2_SAMPLE.exists():
+        assert resolve_config(AG2_SAMPLE)[1] == "builtin:ag2"
+        assert not sniff_config(avalon, AG2_SAMPLE)
+        assert not sniff_config(support, AG2_SAMPLE)
+
+
+@pytest.mark.skipif(not AG2_SAMPLE.exists(), reason="local AG2 sample tree is absent")
+def test_local_ag2_tree_resolves_and_checks() -> None:
+    config, adapter_ref = resolve_config(AG2_SAMPLE)
+
+    assert adapter_ref == "builtin:ag2"
+    with SqliteStore(":memory:") as store:
+        report = ingest(config, AG2_SAMPLE, store)
+    assert report.line_failures == []
 
 
 def test_resolution_rejects_unmatched_root(tmp_path: Path) -> None:
@@ -113,4 +135,5 @@ def test_aggregate_sniff_is_streaming(tmp_path: Path, monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(Path, "open", guarded_open)
     assert sniff_config(config, target)
+    monkeypatch.undo()
     assert resolve_config(target)[1] == "builtin:avalon"

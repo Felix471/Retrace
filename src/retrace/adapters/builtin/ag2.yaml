@@ -1,8 +1,7 @@
-# Status: works today
-# Promoted to builtin:ag2 on 2026-08-21; the shipped copy is src/retrace/adapters/builtin/ag2.yaml
+# Promoted from the MAST release gate on 2026-08-21; content via join('\n', content); note excluded for annotation-leakage reasons; sniff uses 100%-coverage top-level keys.
 retrace_mapping: 1
 run_discovery:
-  pattern: AG2/*.json
+  pattern: "*.json"
   unit: json
 run:
   id: instance_id
@@ -27,7 +26,5 @@ event:
 sniff:
   required_fields:
     - instance_id
-    - problem_statement
-    - other_data
     - trajectory
-    - note
+    - other_data

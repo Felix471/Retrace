@@ -4,8 +4,6 @@ Retrace is a local-first viewer for inspecting, replaying, tagging, and comparin
 structured multi-agent logs. It is an offline inspection tool, not a monitoring
 service, SDK, or cloud platform.
 
-tested against real AG2 and HyperAgent traces from the MAST corpus (config-only); free-text logs are out of scope in v1.
-
 See the [changelog](CHANGELOG.md) for release notes.
 
 ## Why local
@@ -38,6 +36,9 @@ The check reports 40 runs, 523 events, and zero warnings. The viewer opens a
 local browser page with those 40 runs and a five-tag failure-mode distribution.
 Use `retrace-logs view demo/ --no-browser` when a browser must not be opened.
 
+tested against real AG2 and HyperAgent traces from the MAST corpus (config-only); free-text logs are out of scope in v1.
+(HyperAgent traces ingest as content-only events - no agent or turn fields exist in the source.)
+
 The batch view lists runs, outcomes, costs, metadata filters and groups, and the
 MAST tag distribution. It is the starting point for opening or selecting runs.
 
@@ -67,6 +68,13 @@ retrace-logs view path/to/logs
 See the [mapping reference](docs/mapping.md), Python adapter protocol (a typed
 extension seam; custom Python adapters are not loadable in v1 - see
 [docs/adapters.md](docs/adapters.md)), and [tagging guide](docs/tagging.md).
+
+This is the author's real experiment corpus, included because it contains real
+logging defects the tool repairs and flags; the game domain is irrelevant.
+
+Shipped builtins are `builtin:ag2` (one JSON document per run, `unit: json`),
+`builtin:support_pipeline` (one directory per run), and `builtin:avalon`
+(one JSONL line per run).
 
 Screenshots: pending (the project owner will capture them).
 

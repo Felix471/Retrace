@@ -193,8 +193,10 @@ the roster join match rate.
 This is the author's real experiment corpus, included because it contains real
 logging defects the tool repairs and flags; the game domain is irrelevant.
 Resolution order is: explicit `--config`; a `retrace.yaml` beside the target;
-the first matching shipped builtin (`builtin:avalon` or
-`builtin:support_pipeline`); otherwise `retrace-logs init` is suggested to
+the first matching shipped builtin: `builtin:ag2` expects one JSON document per
+run (`unit: json`), `builtin:avalon` expects one JSONL line per run, and
+`builtin:support_pipeline` expects one directory per run. Otherwise,
+`retrace-logs init` is suggested to
 create a draft. `init` does not bypass validation: edit the draft, then run
 `retrace-logs check`.
 
