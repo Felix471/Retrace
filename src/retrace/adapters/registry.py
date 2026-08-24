@@ -11,6 +11,7 @@ from typing import BinaryIO
 
 import yaml
 
+from retrace.adapters.discovery import is_tag_sidecar
 from retrace.adapters.mapping_schema import (
     MappingConfig,
     MappingConfigError,
@@ -63,7 +64,7 @@ def _matching_paths(root: Path, pattern: str, unit: str) -> list[Path]:
     matches = sorted(root.glob(pattern.rstrip("/\\") if unit == "dir" else pattern))
     if unit == "dir":
         return [path for path in matches if path.is_dir()]
-    return [path for path in matches if path.is_file()]
+    return [path for path in matches if path.is_file() and not is_tag_sidecar(path)]
 
 
 def _records(stream: BinaryIO) -> Iterator[dict[str, object]]:

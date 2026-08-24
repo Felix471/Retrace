@@ -135,6 +135,31 @@ def test_list_runs_filters_groups_and_hostile_metadata() -> None:
         assert store.get_run("r-1") is not None
 
 
+def test_list_runs_preserves_typed_groups_and_filters_scalars() -> None:
+    runs = [
+        make_run("false", metadata={"flag": False, "level": 0, "kind": "plain"}),
+        make_run("true", metadata={"flag": True, "level": 1, "kind": "plain"}),
+        make_run("other", metadata={"flag": [True], "level": {"value": 1}}),
+    ]
+    with SqliteStore(":memory:") as store:
+        for run in runs:
+            store.insert_run(run, [])
+
+        assert [run.id for run in store.list_runs({"flag": ["false"]})] == ["false"]
+        assert [run.id for run in store.list_runs({"flag": ["0"]})] == ["false"]
+        assert [run.id for run in store.list_runs({"flag": ["true", "1"]})] == ["true"]
+        assert [run.id for run in store.list_runs({"level": ["1"]})] == ["true"]
+        assert [run.id for run in store.list_runs({"kind": ["plain"]})] == [
+            "false", "true"
+        ]
+        assert [(value, run.id) for value, run in store.list_runs(group_by="flag")] == [
+            (False, "false"), ([True], "other"), (True, "true")
+        ]
+        assert [(value, run.id) for value, run in store.list_runs(group_by="level")] == [
+            (0, "false"), ({"value": 1}, "other"), (1, "true")
+        ]
+
+
 def test_hot_queries_use_indexes() -> None:
     with SqliteStore(":memory:") as store:
         store.insert_run(make_run(), [make_event("e-0", 0)])

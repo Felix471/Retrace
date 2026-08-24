@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from retrace.adapters.discovery import discover_runs_with_report
+from retrace.adapters.discovery import discover_runs_with_report, is_tag_sidecar
 from retrace.adapters.mapping_schema import MappingConfigError, validate_mapping_config
 from retrace.adapters.registry import sniff_config
 from retrace.cli.init_scaffold import detect_layout, render_draft
@@ -189,6 +189,7 @@ def test_local_ag2_full_tree_duplicate_ids() -> None:
     original_ids = {
         str(json.loads(path.read_text(encoding="utf-8-sig"))["instance_id"])
         for path in root.glob("**/*.json")
+        if not is_tag_sidecar(path)
     }
     with SqliteStore(":memory:") as store:
         report = ingest(validate_mapping_config(raw), root, store)

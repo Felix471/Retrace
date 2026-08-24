@@ -107,10 +107,26 @@ def _json(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
-def _json_path(key: str) -> str:
-    """Build a quoted SQLite JSON path; the result is always bound as a value."""
-    escaped = key.replace("\\", "\\\\").replace('"', '\\"')
-    return f'$."{escaped}"'
+def _metadata_filter_value(value: object) -> str | None:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, str):
+        return value
+    return None
+
+
+def _metadata_matches(value: object, accepted: Sequence[Any]) -> bool:
+    canonical = _metadata_filter_value(value)
+    if canonical is None:
+        return False
+    if any(raw == canonical for raw in accepted):
+        return True
+    if isinstance(value, bool):
+        alternate = "1" if value else "0"
+        return any(raw == alternate for raw in accepted)
+    return False
 
 
 def _run_values(run: Run) -> tuple[Any, ...]:
@@ -232,21 +248,16 @@ class SqliteStore:
     def _runs_query(filters: RunFilters | None, group_by: str | None) -> tuple[str, list[Any]]:
         params: list[Any] = []
         select = _RUN_COLUMNS
-        if group_by is not None:
-            select = "json_extract(metadata, ?) AS group_value, " + select
-            params.append(_json_path(group_by))
         clauses: list[str] = []
         for key, accepted in (filters or {}).items():
+            if key not in {"outcome", "source_path"}:
+                continue
             values = list(accepted)
             if not values:
                 clauses.append("0")
                 continue
             placeholders = ",".join("?" for _ in values)
-            if key in {"outcome", "source_path"}:
-                clauses.append(f"{key} IN ({placeholders})")
-            else:
-                clauses.append(f"json_extract(metadata, ?) IN ({placeholders})")
-                params.append(_json_path(key))
+            clauses.append(f"{key} IN ({placeholders})")
             params.extend(values)
         query = f"SELECT {select} FROM runs"
         if clauses:
@@ -258,9 +269,22 @@ class SqliteStore:
     ) -> list[Run] | list[GroupedRun]:
         query, params = self._runs_query(filters, group_by)
         rows = self._connection.execute(query, params).fetchall()
+        runs = [_row_to_run(row) for row in rows]
+        # JSON scalar matching is type-sensitive, so metadata filters are applied
+        # after the indexed reserved SQL filters while the parsed types are available.
+        metadata_filters = {
+            key: accepted
+            for key, accepted in (filters or {}).items()
+            if key not in {"outcome", "source_path"}
+        }
+        runs = [
+            run for run in runs
+            if all(_metadata_matches(run.metadata.get(key), accepted)
+                   for key, accepted in metadata_filters.items())
+        ]
         if group_by is None:
-            return [_row_to_run(row) for row in rows]
-        return [(row["group_value"], _row_to_run(row)) for row in rows]
+            return runs
+        return [(run.metadata.get(group_by), run) for run in runs]
 
     @staticmethod
     def _events_where(

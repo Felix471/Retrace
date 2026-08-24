@@ -10,6 +10,7 @@ import pytest
 
 from retrace.adapters.registry import resolve_config
 from retrace.core.ingest import ingest
+from retrace.core.model import Run
 from retrace.core.store import SqliteStore
 from retrace.server.app import RUN_SORT_FIELDS, create_app
 
@@ -36,6 +37,59 @@ def _check(path: Path, check: Callable[[httpx.AsyncClient], Awaitable[None]]) ->
             await check(client)
 
     asyncio.run(run())
+
+
+def _typed_database(tmp_path: Path) -> Path:
+    path = tmp_path / "typed.db"
+    with SqliteStore(path) as store:
+        for run_id, metadata in (
+            ("false-zero", {"flag": False, "level": 0, "kind": "plain"}),
+            ("true-one", {"flag": True, "level": 1, "kind": "plain"}),
+            ("true-zero", {"flag": True, "level": 0, "kind": "other"}),
+        ):
+            store.insert_run(
+                Run(
+                    id=run_id, experiment_id="typed", source_path=f"{run_id}.json",
+                    metadata=metadata, outcome="ok", started_at=None, ended_at=None,
+                    duration_s=None, n_events=0, n_turns=0, agent_ids=[], phases=[],
+                    tokens_in=None, tokens_out=None, total_cost=None,
+                    ingest_warnings=0, n_repaired=0,
+                ),
+                [],
+            )
+    return path
+
+
+def test_typed_metadata_grouping_and_filtering(tmp_path: Path) -> None:
+    path = _typed_database(tmp_path)
+
+    async def check(client: httpx.AsyncClient) -> None:
+        grouped = (await client.get("/api/runs", params={"group_by": "flag"})).json()
+        assert {group["group_value"] for group in grouped["groups"]} == {False, True}
+        for group in grouped["groups"]:
+            matching = [
+                row for row in grouped["rows"]
+                if str(row["metadata"]["flag"]).lower()
+                == str(group["group_value"]).lower()
+            ]
+            assert len(matching) == group["run_count"]
+
+        for raw, expected in (("false", {"false-zero"}), ("0", {"false-zero"}),
+                              ("true", {"true-one", "true-zero"}),
+                              ("1", {"true-one", "true-zero"})):
+            response = (await client.get("/api/runs", params={"flag": raw})).json()
+            assert {row["id"] for row in response["rows"]} == expected
+
+        levels = (await client.get("/api/runs", params={"level": "1"})).json()
+        assert {row["id"] for row in levels["rows"]} == {"true-one"}
+        level_groups = (
+            await client.get("/api/runs", params={"group_by": "level"})
+        ).json()["groups"]
+        assert {group["group_value"] for group in level_groups} == {0, 1}
+        strings = (await client.get("/api/runs", params={"kind": "plain"})).json()
+        assert {row["id"] for row in strings["rows"]} == {"false-zero", "true-one"}
+
+    _check(path, check)
 
 
 @pytest.mark.parametrize("fixture", ["avalon_mini", "support_pipeline"])

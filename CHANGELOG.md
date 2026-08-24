@@ -20,6 +20,9 @@ Semantic Versioning.
 
 ### Fixed
 
+- Preserved boolean and numeric JSON types in grouped run metadata values.
+- Matched boolean and numeric metadata values correctly in run filters.
+- Excluded `retrace.json` and `*.retrace.json` tag sidecars from run discovery.
 - Made duplicate run IDs robust for JSON and line units (T33b) with warned relative-path fallback IDs so ingest never crashes, as found during the gate re-run.
 
 ## [0.1.0] - 2026-08-20

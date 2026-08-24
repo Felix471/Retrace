@@ -155,6 +155,19 @@ def test_line_unit_discovers_json_objects(tmp_path: Path) -> None:
     assert [(run.run_id, run.line_no) for run in runs] == [("one", 1)]
 
 
+@pytest.mark.parametrize("unit", ["file", "json"])
+def test_tag_sidecars_are_excluded_from_file_discovery(tmp_path: Path, unit: str) -> None:
+    for name in ("one.json", "two.json", "foo.retrace.json", "retrace.json"):
+        (tmp_path / name).write_text('{"id":"' + name + '"}', encoding="utf-8")
+    run_id = "id" if unit == "json" else "{file_stem}"
+
+    runs = discover_runs(_config("*.json", unit=unit, run_id=run_id), tmp_path)
+
+    assert len(runs) == 2
+    assert {run.events_path.name for run in runs} == {"one.json", "two.json"}
+    assert all(".retrace" not in run.run_id for run in runs)
+
+
 def test_discovery_is_read_only(tmp_path: Path) -> None:
     directory = tmp_path / "run"
     directory.mkdir()

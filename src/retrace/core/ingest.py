@@ -14,6 +14,7 @@ from retrace.adapters.discovery import (
     RunSource,
     discover_runs,
     discover_runs_with_report,
+    is_tag_sidecar,
     iter_jsonl_records,
 )
 from retrace.adapters.extract import ExtractionStats, Extractor, FieldStats
@@ -123,7 +124,10 @@ def _line_files(config: MappingConfig, root: Path) -> list[Path]:
     pattern = config.run_discovery.pattern
     if Path(pattern).is_absolute() or ".." in pattern.replace("\\", "/").split("/"):
         raise MappingConfigError("run_discovery.pattern: invalid line-unit pattern")
-    return sorted(path for path in root.glob(pattern) if path.is_file())
+    return sorted(
+        path for path in root.glob(pattern)
+        if path.is_file() and not is_tag_sidecar(path)
+    )
 
 
 def _event(run_id: str, item: MultiSourceEvent, ordinal: int | None = None) -> Event:

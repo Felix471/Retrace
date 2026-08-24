@@ -23,6 +23,7 @@ __all__ = [
     "RunSource",
     "discover_runs",
     "discover_runs_with_report",
+    "is_tag_sidecar",
     "iter_jsonl_records",
     "load_json_document",
 ]
@@ -92,6 +93,11 @@ def _relative_posix(path: Path, root: Path) -> str:
     return path.relative_to(root).as_posix()
 
 
+def is_tag_sidecar(path: Path) -> bool:
+    """Return whether *path* is a retrace-owned tag sidecar."""
+    return path.name == "retrace.json" or path.name.endswith(".retrace.json")
+
+
 def _find_candidates(config: MappingConfig, root: Path) -> list[_Candidate]:
     discovery = config.run_discovery
     pattern = discovery.pattern
@@ -114,7 +120,7 @@ def _find_candidates(config: MappingConfig, root: Path) -> list[_Candidate]:
             )
             continue
         if discovery.unit in ("file", "line", "json"):
-            if match.is_file():
+            if match.is_file() and not is_tag_sidecar(match):
                 candidates.append(
                     _Candidate(match, match, _relative_posix(match, root))
                 )
@@ -122,6 +128,8 @@ def _find_candidates(config: MappingConfig, root: Path) -> list[_Candidate]:
         if not match.is_dir():
             continue
         events_path = match / str(discovery.events_file)
+        if is_tag_sidecar(events_path):
+            continue
         if not events_path.is_file():
             warnings.warn(
                 _warning(match, f"skipped directory; expected file {events_path}"),
