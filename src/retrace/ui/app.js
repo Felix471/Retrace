@@ -1,6 +1,6 @@
 import { Component, h, render } from "/ui/vendor/preact.module.js";
 import htm from "/ui/vendor/htm.module.js";
-import { compareBannerState, compareStateParse, compareStateSerialize, cycleSort, distributionBars, formatCell, groupByCategory, groupByTurn, groupValueOf, gutterMarkFor, highlightSegments, laneFor, matchesSearch, outcomeBarSegments, pagesNeededFor, parseHashState, parseTableHashState, previewOf, resolveAnchors, selectionToCompareState, serializeHashState, serializeTableHashState, tagListWith, tagListWithout, toggleColumn, toggleSelection } from "/ui/logic.js";
+import { compareBannerState, compareStateParse, compareStateSerialize, cycleSort, distributionBars, formatCell, groupByCategory, groupByTurn, groupLabel, groupValueOf, gutterMarkFor, highlightSegments, laneFor, matchesSearch, outcomeBarSegments, pagesNeededFor, parseHashState, parseTableHashState, previewOf, resolveAnchors, selectionToCompareState, serializeHashState, serializeTableHashState, tagListWith, tagListWithout, toggleColumn, toggleSelection } from "/ui/logic.js";
 
 const html = htm.bind(h);
 const PAGE_SIZE = 500;
@@ -342,7 +342,7 @@ class BatchTable extends Component {
           const groupRows = rows.filter(row => String(groupValueOf(row, view.groupBy)) === String(group.group_value));
           const segments = outcomeBarSegments(group.outcome_distribution, 240);
           const header = html`<tr class="group-header"><th colSpan=${SUMMARY_COLUMNS.length + view.columns.length + 1}>
-            <div class="group-title">${group.group_value ?? "(missing)"}</div>
+            <div class="group-title">${groupLabel(group.group_value, "(missing)")}</div>
             <div class="aggregate-strip">
               <span>${group.run_count} runs</span><span>turns mean ${formatCell(group.mean_turns, "mean_turns")}, median ${formatCell(group.median_turns, "median_turns")}</span>
               <span>mean cost ${formatCell(group.mean_cost, "total_cost")}${group.cost_excluded ? ` (cost n/a for ${group.cost_excluded})` : ""}</span>
@@ -369,7 +369,7 @@ class BatchTable extends Component {
             const descriptions = new Map(vocabulary.map(mode => [mode.id, mode.description]));
             const geometry = new Map(distributionBars(set.modes, 260).map(bar => [bar.id, bar]));
             return html`<section class="tag-distribution-set">
-              ${distribution.groups && html`<h3>${set.group_value ?? "(none)"}</h3>`}
+              ${distribution.groups && html`<h3>${groupLabel(set.group_value, "(none)")}</h3>`}
               ${groupByCategory(set.modes).map(category => html`<div class="tag-category"><h4>${category.category}</h4>
                 ${category.modes.map(mode => { const bar = geometry.get(mode.id); return html`<div class="tag-bar-row">
                   <span class="tag-bar-name">${mode.id} ${mode.name}</span>

@@ -201,6 +201,10 @@ export function groupValueOf(run, groupKey) {
   return run.metadata[groupKey] ?? null;
 }
 
+export function groupLabel(value, fallback) {
+  return value === null || value === undefined ? fallback : String(value);
+}
+
 export function outcomeBarSegments(distribution, totalWidth) {
   const entries = Object.entries(distribution || {}).filter(([, count]) => Number(count) > 0);
   const total = entries.reduce((sum, [, count]) => sum + Number(count), 0);

@@ -20,6 +20,7 @@ Semantic Versioning.
 
 ### Fixed
 
+- Rendered boolean and numeric group labels as text in the batch UI.
 - Preserved boolean and numeric JSON types in grouped run metadata values.
 - Matched boolean and numeric metadata values correctly in run filters.
 - Excluded `retrace.json` and `*.retrace.json` tag sidecars from run discovery.

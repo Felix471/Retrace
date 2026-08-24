@@ -265,6 +265,21 @@ def test_group_value_of_present_missing_and_null() -> None:
     assert _call("groupValueOf", run, "empty") is None
 
 
+@pytest.mark.parametrize(
+    ("value", "fallback", "expected"),
+    [
+        (False, "(missing)", "false"),
+        (True, "(missing)", "true"),
+        (0, "(none)", "0"),
+        (1.5, "(none)", "1.5"),
+        (None, "(missing)", "(missing)"),
+        ("abc", "(missing)", "abc"),
+    ],
+)
+def test_group_label(value: object, fallback: str, expected: str) -> None:
+    assert _call("groupLabel", value, fallback) == expected
+
+
 def test_toggle_column_add_remove_order_and_no_duplicates() -> None:
     assert _call("toggleColumn", ["first"], "second") == ["first", "second"]
     assert _call("toggleColumn", ["first", "second"], "first") == ["second"]
