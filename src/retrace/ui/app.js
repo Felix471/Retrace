@@ -1,6 +1,6 @@
 import { Component, h, render } from "/ui/vendor/preact.module.js";
 import htm from "/ui/vendor/htm.module.js";
-import { compareBannerState, compareStateParse, compareStateSerialize, cycleSort, distributionBars, formatCell, groupByCategory, groupByTurn, groupLabel, groupValueOf, gutterMarkFor, highlightSegments, laneFor, matchesSearch, outcomeBarSegments, pagesNeededFor, parseHashState, parseTableHashState, previewOf, resolveAnchors, selectionToCompareState, serializeHashState, serializeTableHashState, tagListWith, tagListWithout, toggleColumn, toggleSelection } from "/ui/logic.js";
+import { compareBannerState, compareStateParse, compareStateSerialize, cycleSort, distributionBars, formatCell, groupByCategory, groupByTurn, groupLabel, groupValueOf, gutterMarkFor, highlightSegments, laneFor, matchesSearch, outcomeBarSegments, pagesNeededFor, parseHashState, parseTableHashState, previewOf, resolveAnchors, selectionToCompareState, serializeHashState, serializeTableHashState, tagListWithout, tagsWithModes, toggleColumn, toggleSelection } from "/ui/logic.js";
 
 const html = htm.bind(h);
 const PAGE_SIZE = 500;
@@ -151,7 +151,7 @@ class Compare extends Component {
 }
 
 class Replay extends Component {
-  state = { run: null, events: [], total: 0, busy: false, error: "", tags: [], runNote: "", vocabulary: [], selectedIds: [], mode: "", note: "", anchor: true, tagBusy: false };
+  state = { run: null, events: [], total: 0, busy: false, error: "", tags: [], runNote: "", vocabulary: [], selectedIds: [], modes: [], note: "", anchor: true, tagBusy: false };
   request = 0;
   componentDidMount() { this.reset(this.props.runId); }
   componentDidUpdate(previous) {
@@ -161,9 +161,9 @@ class Replay extends Component {
     }
   }
   reset(runId) {
-    this.setState({ run: null, events: [], total: 0, error: "", tags: [], selectedIds: [], mode: "", note: "" });
+    this.setState({ run: null, events: [], total: 0, error: "", tags: [], selectedIds: [], modes: [], note: "" });
     json(`/api/runs/${encodeURIComponent(runId)}`).then(run => this.setState({ run })).catch(reason => this.setState({ error: String(reason) }));
-    json("/api/tags/vocabulary").then(value => this.setState({ vocabulary: value.categories, mode: value.categories[0]?.modes[0]?.id || "" })).catch(reason => this.setState({ error: String(reason) }));
+    json("/api/tags/vocabulary").then(value => this.setState({ vocabulary: value.categories })).catch(reason => this.setState({ error: String(reason) }));
     json(`/api/runs/${encodeURIComponent(runId)}/tags`).then(value => this.setState({ tags: value.tags, runNote: value.run_note })).catch(reason => this.setState({ error: String(reason) }));
     this.load(0, false, runId);
   }
@@ -180,8 +180,8 @@ class Replay extends Component {
   }
   async addTag(event) {
     event.preventDefault();
-    const tag = { mode: this.state.mode, note: this.state.note, event_ids: this.state.anchor ? this.state.selectedIds : [] };
-    if (await this.replaceTags(tagListWith(this.state.tags, tag))) this.setState({ note: "", selectedIds: [] });
+    const tags = tagsWithModes(this.state.tags, this.state.modes, this.state.note, this.state.anchor ? this.state.selectedIds : []);
+    if (await this.replaceTags(tags)) this.setState({ note: "", selectedIds: [], modes: [] });
   }
   async jumpTo(eventId) {
     const ordinal = ordinalOf(eventId);
@@ -221,7 +221,7 @@ class Replay extends Component {
       if (request === this.request) this.setState({ busy: false });
     }
   }
-  render({ agent, phase, type, q, onState, backHash }, { run, events, total, busy, error, tags, vocabulary, selectedIds, mode, note, anchor, tagBusy }) {
+  render({ agent, phase, type, q, onState, backHash }, { run, events, total, busy, error, tags, vocabulary, selectedIds, modes, note, anchor, tagBusy }) {
   if (error) return html`<p class="error">${error}</p>`;
   if (!run) return html`<p>Loading run...</p>`;
   return html`<section class="replay">
@@ -246,12 +246,12 @@ class Replay extends Component {
         </div></details>`;
       })}</div>
       <form class="tag-form" onSubmit=${event => this.addTag(event)}>
-        <label>Failure mode<select required value=${mode} onChange=${event => this.setState({ mode: event.target.value })}>
+        <label>Failure mode<select multiple size="8" required value=${modes} onChange=${event => this.setState({ modes: Array.from(event.target.selectedOptions, option => option.value) })}>
           ${vocabulary.map(category => html`<optgroup label=${category.category}>${category.modes.map(item => html`<option value=${item.id} title=${item.description}>${item.id} ${item.name}</option>`)}</optgroup>`)}
         </select></label>
         <label>Note (optional)<textarea value=${note} onInput=${event => this.setState({ note: event.target.value })}></textarea></label>
         <label class="anchor-toggle"><input type="checkbox" checked=${anchor} onChange=${event => this.setState({ anchor: event.target.checked })} /> Anchor to selected events (${selectedIds.length})</label>
-        <button disabled=${tagBusy || !mode}>Add tag</button>
+        <button disabled=${tagBusy || modes.length === 0}>Add tag</button>
       </form>
     </details>
     <div class="filters">

@@ -82,6 +82,13 @@ export function tagListWith(tags, newTag) {
   return [...tags, newTag];
 }
 
+export function tagsWithModes(tags, modes, note, eventIds) {
+  return [
+    ...tags,
+    ...modes.map(mode => ({ mode, note, event_ids: [...eventIds] })),
+  ];
+}
+
 export function tagListWithout(tags, index) {
   return tags.filter((_tag, tagIndex) => tagIndex !== index);
 }

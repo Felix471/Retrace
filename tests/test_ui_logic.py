@@ -327,3 +327,37 @@ def test_tag_list_helpers_are_immutable() -> None:
     removed = _call_with_inputs("tagListWithout", tags, 0)
     assert removed["result"] == [tags[1]]
     assert removed["arguments"] == [tags, 0]
+
+
+def test_tags_with_modes_fans_out_in_order() -> None:
+    assert _call("tagsWithModes", [], ["1.2", "3.4"], "shared note", ["run:1", "run:2"]) == [
+        {"mode": "1.2", "note": "shared note", "event_ids": ["run:1", "run:2"]},
+        {"mode": "3.4", "note": "shared note", "event_ids": ["run:1", "run:2"]},
+    ]
+
+
+def test_tags_with_modes_empty_modes_preserves_existing_tags() -> None:
+    tags = [{"mode": "1.1", "note": "existing", "event_ids": []}]
+    assert _call("tagsWithModes", tags, [], "unused", ["run:1"]) == tags
+
+
+def test_tags_with_modes_copies_event_ids_for_each_tag() -> None:
+    script = """
+const logic = await import(process.argv[1]);
+const tags = logic.tagsWithModes([], ["1.1", "1.2"], "note", ["run:1"]);
+tags[0].event_ids.push("changed");
+process.stdout.write(JSON.stringify(tags[1].event_ids));
+"""
+    completed = subprocess.run(
+        [NODE or "node", "--experimental-default-type=module", "--input-type=module", "-e", script, LOGIC.as_uri()],
+        encoding="utf-8", capture_output=True, check=True,
+    )
+    assert json.loads(completed.stdout) == ["run:1"]
+
+
+def test_tags_with_modes_appends_after_existing_tags() -> None:
+    existing = [{"mode": "1.1", "note": "old", "event_ids": []}]
+    assert _call("tagsWithModes", existing, ["2.1"], "new", ["run:3"]) == [
+        *existing,
+        {"mode": "2.1", "note": "new", "event_ids": ["run:3"]},
+    ]

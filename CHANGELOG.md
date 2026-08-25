@@ -16,6 +16,7 @@ Semantic Versioning.
 
 ### Changed
 
+- The replay tag form accepts several failure modes at once and saves one tag per mode.
 - Corrected D29 claims to "structured logs (JSON/JSONL, any layout)" and updated the README verdict line.
 
 ### Fixed
