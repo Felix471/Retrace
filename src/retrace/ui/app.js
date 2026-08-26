@@ -1,6 +1,6 @@
 import { Component, h, render } from "/ui/vendor/preact.module.js";
 import htm from "/ui/vendor/htm.module.js";
-import { compareBannerState, compareStateParse, compareStateSerialize, cycleSort, distributionBars, formatCell, groupByCategory, groupByTurn, groupLabel, groupValueOf, gutterMarkFor, highlightSegments, laneFor, matchesSearch, outcomeBarSegments, pagesNeededFor, parseHashState, parseTableHashState, previewOf, resolveAnchors, selectionToCompareState, serializeHashState, serializeTableHashState, tagListWithout, tagsWithModes, toggleColumn, toggleSelection } from "/ui/logic.js";
+import { compareBannerState, compareStateParse, compareStateSerialize, cycleSort, distributionBars, formatCell, groupByCategory, groupByTurn, groupLabel, groupValueOf, gutterMarkFor, highlightSegments, laneFor, matchesSearch, outcomeBarSegments, pagesNeededFor, parseHashState, parseTableHashState, previewOf, resolveAnchors, selectionToCompareState, serializeHashState, serializeTableHashState, tagListWithout, tagProvenanceLabel, tagsWithModes, toggleColumn, toggleSelection } from "/ui/logic.js";
 
 const html = htm.bind(h);
 const PAGE_SIZE = 500;
@@ -236,6 +236,7 @@ class Replay extends Component {
         const available = new Set(resolution.anchored);
         return html`<details class="tag-item" key=${`${tag.created_at}-${index}`}><summary>
           <b>${tag.mode} ${modeInfo?.name || ""}</b> <span>${tag.event_ids.length} anchors</span>
+          <span class="badge tag-source">${tagProvenanceLabel(tag)}</span>
           ${resolution.detachedFromApi.length > 0 && html`<span class="badge detached">${resolution.detachedFromApi.length} detached</span>`}
         </summary><div class="tag-body">
           ${tag.note && html`<p>${tag.note}</p>`}<small>Created ${tag.created_at}</small>

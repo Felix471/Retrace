@@ -89,6 +89,13 @@ export function tagsWithModes(tags, modes, note, eventIds) {
   ];
 }
 
+export function tagProvenanceLabel(tag) {
+  const source = typeof tag?.source === "string" && tag.source.length > 0 ? tag.source : "manual";
+  return typeof tag?.confidence === "number" && Number.isFinite(tag.confidence)
+    ? `${source} ${tag.confidence.toFixed(2)}`
+    : source;
+}
+
 export function tagListWithout(tags, index) {
   return tags.filter((_tag, tagIndex) => tagIndex !== index);
 }

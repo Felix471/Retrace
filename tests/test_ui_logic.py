@@ -336,6 +336,32 @@ def test_tags_with_modes_fans_out_in_order() -> None:
     ]
 
 
+@pytest.mark.parametrize(
+    ("tag", "expected"),
+    [
+        ({"source": "manual"}, "manual"),
+        ({"source": "llm", "confidence": 0.97}, "llm 0.97"),
+        ({"source": "llm", "confidence": 1}, "llm 1.00"),
+        ({}, "manual"),
+        ({"source": "llm", "confidence": None}, "llm"),
+    ],
+)
+def test_tag_provenance_label(tag: dict[str, object], expected: str) -> None:
+    assert _call("tagProvenanceLabel", tag) == expected
+
+
+def test_tag_provenance_label_ignores_nan_confidence() -> None:
+    script = """
+const logic = await import(process.argv[1]);
+process.stdout.write(JSON.stringify(logic.tagProvenanceLabel({source: "llm", confidence: NaN})));
+"""
+    completed = subprocess.run(
+        [NODE or "node", "--experimental-default-type=module", "--input-type=module", "-e", script, LOGIC.as_uri()],
+        encoding="utf-8", capture_output=True, check=True,
+    )
+    assert json.loads(completed.stdout) == "llm"
+
+
 def test_tags_with_modes_empty_modes_preserves_existing_tags() -> None:
     tags = [{"mode": "1.1", "note": "existing", "event_ids": []}]
     assert _call("tagsWithModes", tags, [], "unused", ["run:1"]) == tags
