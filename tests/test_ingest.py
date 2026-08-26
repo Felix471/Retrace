@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
 
+from retrace.adapters.discovery import DiscoveryError
 from retrace.adapters.mapping_schema import MappingConfigError, validate_mapping_config
 from retrace.core.ingest import IngestReport, ingest
 from retrace.core.store import SqliteStore
@@ -88,6 +90,138 @@ def test_ingest_report_aggregates_roster_join_counts() -> None:
 
     assert report.roster_join_by_run == {"run-a": (3, 5), "run-b": (2, 4)}
     assert (report.roster_matched, report.roster_agent_bearing) == (5, 9)
+
+
+@pytest.mark.parametrize("reingest", [False, True])
+def test_directory_ingest_purges_vanished_source_and_preserves_survivor(
+    tmp_path: Path, reingest: bool,
+) -> None:
+    _tree(tmp_path)
+    second_events = _tree(tmp_path / "staging")
+    second_events.parent.rename(tmp_path / "case-two")
+    (tmp_path / "staging").rmdir()
+    second_events = tmp_path / "case-two" / "events.jsonl"
+    config = _flat_config()
+
+    with SqliteStore(tmp_path / "cache.db") as store:
+        ingest(config, tmp_path, store)
+        before = {run.source_path: run.id for run in store.list_runs()}
+        second_events.parent.rename(tmp_path / "vanished")
+        for child in (tmp_path / "vanished").iterdir():
+            child.unlink()
+        (tmp_path / "vanished").rmdir()
+
+        report = ingest(config, tmp_path, store, reingest=reingest)
+        remaining = store.list_runs()
+
+    assert report.runs_purged == 1
+    assert len(remaining) == 1
+    assert remaining[0].id == before[remaining[0].source_path]
+
+
+def test_line_ingest_purges_vanished_source_and_preserves_survivor(tmp_path: Path) -> None:
+    config = validate_mapping_config({
+        "retrace_mapping": 1,
+        "run_discovery": {"pattern": "*.jsonl", "unit": "line"},
+        "run": {"id": "id"},
+        "event": {"sources": [
+            {"name": "items", "path": "items", "fields": {"content": "text"}},
+        ]},
+    })
+    paths = [tmp_path / "one.jsonl", tmp_path / "two.jsonl"]
+    for index, path in enumerate(paths):
+        path.write_text(
+            json.dumps({"id": f"run-{index}", "items": [{"text": path.stem}]}) + "\n",
+            encoding="utf-8",
+        )
+
+    with SqliteStore(tmp_path / "cache.db") as store:
+        ingest(config, tmp_path, store)
+        before = {run.source_path: run.id for run in store.list_runs()}
+        paths[0].unlink()
+        report = ingest(config, tmp_path, store)
+        remaining = store.list_runs()
+
+    assert report.runs_purged == 1
+    assert len(remaining) == 1
+    assert remaining[0].id == before[remaining[0].source_path]
+
+
+def test_ingest_purges_all_runs_when_all_sources_vanish(tmp_path: Path) -> None:
+    events_path = _tree(tmp_path)
+    with SqliteStore(tmp_path / "cache.db") as store:
+        ingest(_flat_config(), tmp_path, store)
+        prior_count = len(store.list_runs())
+        for child in events_path.parent.iterdir():
+            child.unlink()
+        events_path.parent.rmdir()
+
+        report = ingest(_flat_config(), tmp_path, store)
+
+        assert report.runs_purged == prior_count
+        assert store.list_runs() == []
+
+
+@pytest.mark.parametrize("unit", ["dir", "line"])
+@pytest.mark.parametrize("missing_root", [False, True])
+def test_fresh_ingest_rejects_empty_discovery(
+    tmp_path: Path, unit: str, missing_root: bool,
+) -> None:
+    config = _flat_config() if unit == "dir" else validate_mapping_config({
+        "retrace_mapping": 1,
+        "run_discovery": {"pattern": "*.jsonl", "unit": "line"},
+        "run": {"id": "id"},
+        "event": {"sources": [
+            {"name": "items", "path": "items", "fields": {"content": "text"}},
+        ]},
+    })
+    root = tmp_path / "missing" if missing_root else tmp_path
+
+    with (
+        SqliteStore(tmp_path / "cache.db") as store,
+        pytest.raises(DiscoveryError),
+    ):
+        ingest(config, root, store)
+
+
+def test_restored_source_with_same_fingerprint_is_reingested(tmp_path: Path) -> None:
+    config = validate_mapping_config({
+        "retrace_mapping": 1,
+        "run_discovery": {"pattern": "*.jsonl", "unit": "line"},
+        "run": {"id": "id"},
+        "event": {"sources": [
+            {"name": "items", "path": "items", "fields": {"content": "text"}},
+        ]},
+    })
+    restored = tmp_path / "one.jsonl"
+    survivor = tmp_path / "two.jsonl"
+    for run_id, path in (("run-one", restored), ("run-two", survivor)):
+        path.write_text(
+            json.dumps({"id": run_id, "items": [{"text": run_id}]}) + "\n",
+            encoding="utf-8",
+        )
+    content = restored.read_bytes()
+    original_stat = restored.stat()
+
+    with SqliteStore(tmp_path / "cache.db") as store:
+        ingest(config, tmp_path, store)
+        original_id = next(
+            run.id for run in store.list_runs()
+            if run.source_path == restored.resolve().as_posix()
+        )
+        restored.unlink()
+        assert ingest(config, tmp_path, store).runs_purged == 1
+
+        restored.write_bytes(content)
+        os.utime(restored, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+        report = ingest(config, tmp_path, store)
+        restored_run = next(
+            run for run in store.list_runs()
+            if run.source_path == restored.resolve().as_posix()
+        )
+
+    assert report.runs_ingested == 1
+    assert restored_run.id == original_id
 
 
 def test_flat_ingest_rejects_non_finite_cost_with_warning(tmp_path: Path) -> None:

@@ -10,8 +10,8 @@ from unittest.mock import patch
 import pytest
 
 from retrace.adapters.registry import resolve_config
-from retrace.cli.main import _hit_rate, main
-from retrace.core.ingest import _config_hash
+from retrace.cli.main import _hit_rate, _print_report, main
+from retrace.core.ingest import IngestReport, _config_hash
 from retrace.core.store import SqliteStore
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -63,6 +63,14 @@ def test_check_support_fixture() -> None:
     assert "Warnings: 2 total" in result.stdout
     assert "Line failures:" in result.stdout
     assert "Roster join:" not in result.stdout
+
+
+def test_check_prints_purge_count_only_when_positive(capsys: pytest.CaptureFixture[str]) -> None:
+    _print_report("test", IngestReport(), (0, 0, 0), [])
+    assert "Purged:" not in capsys.readouterr().out
+
+    _print_report("test", IngestReport(runs_purged=2), (0, 0, 0), [])
+    assert "Warnings: 0 total\nPurged: 2 stale runs\n" in capsys.readouterr().out
 
 
 def test_check_reports_partial_and_missing_roster_matches(tmp_path: Path) -> None:

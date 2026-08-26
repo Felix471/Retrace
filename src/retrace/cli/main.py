@@ -78,6 +78,8 @@ def _print_report(
         if rate is not None:
             print(f"  {_ascii(path)}: {rate:.1f}% ({counter.hits}/{total})")
     print(f"Warnings: {warning_count} total")
+    if report.runs_purged > 0:
+        print(f"Purged: {report.runs_purged} stale runs")
     if report.roster_join_enabled:
         total = report.roster_agent_bearing
         rate = None if total == 0 else 100 * report.roster_matched / total

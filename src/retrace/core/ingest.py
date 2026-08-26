@@ -11,6 +11,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from retrace.adapters.discovery import (
+    DiscoveryError,
+    DiscoveryReport,
     RunSource,
     discover_runs,
     discover_runs_with_report,
@@ -35,6 +37,7 @@ class IngestReport:
     runs_ingested: int = 0
     runs_replaced: int = 0
     runs_skipped_unchanged: int = 0
+    runs_purged: int = 0
     line_failures: list[LineFailure] = field(default_factory=list)
     per_file_line_failures: dict[Path, int] = field(default_factory=dict)
     config_hash_warning: bool = False
@@ -128,6 +131,18 @@ def _line_files(config: MappingConfig, root: Path) -> list[Path]:
         path for path in root.glob(pattern)
         if path.is_file() and not is_tag_sidecar(path)
     )
+
+
+def _purge_stale_runs(
+    store: SqliteStore,
+    existing: dict[str, Run],
+    discovered_paths: set[str],
+) -> int:
+    stale = [run for run in existing.values() if run.source_path not in discovered_paths]
+    for source_path in {run.source_path for run in stale}:
+        store.delete_runs_for_source(source_path)
+        store.delete_fingerprint(source_path)
+    return len(stale)
 
 
 def _event(run_id: str, item: MultiSourceEvent, ordinal: int | None = None) -> Event:
@@ -309,10 +324,16 @@ def ingest(
     experiment_id = stable_root_hash(root)
     known_fingerprints = store.fingerprints()
     existing = {run.id: run for run in store.list_runs()}
+    stored_root = store.meta_get("root_path")
+    reconcile = stored_root is None or stored_root == _source_path(root)
     store.meta_set("discovery_unit", config.run_discovery.unit)
 
     if config.run_discovery.unit in ("line", "json"):
         candidate_files = _line_files(config, root)
+        if reconcile:
+            report.runs_purged = _purge_stale_runs(
+                store, existing, {_source_path(path) for path in candidate_files}
+            )
         changed_files = [
             path for path in candidate_files
             if reingest or known_fingerprints.get(_source_path(path))
@@ -325,8 +346,12 @@ def ingest(
         unchanged_ids = {
             run.id for run in existing.values() if run.source_path in unchanged
         }
-        discovery = discover_runs_with_report(
-            config, root, include_paths=changed_files, reserved_ids=unchanged_ids
+        discovery = (
+            discover_runs_with_report(
+                config, root, include_paths=changed_files, reserved_ids=unchanged_ids
+            )
+            if candidate_files or not (existing and reconcile)
+            else DiscoveryReport([], [], {})
         )
         report.line_failures.extend(discovery.line_failures)
         report.per_file_line_failures.update(discovery.per_file_failure_counts)
@@ -409,7 +434,20 @@ def ingest(
         store.meta_set("root_path", _source_path(root))
         return report
     else:
-        all_sources = discover_runs(config, root)
+        try:
+            all_sources = discover_runs(config, root)
+        except DiscoveryError as error:
+            if (
+                "no matches for pattern" not in str(error)
+                or not existing
+                or not reconcile
+            ):
+                raise
+            all_sources = []
+        if reconcile:
+            report.runs_purged = _purge_stale_runs(
+                store, existing, {_source_path(source.events_path) for source in all_sources}
+            )
         changed_paths = {
             _source_path(source.events_path) for source in all_sources
             if reingest or known_fingerprints.get(_source_path(source.events_path))

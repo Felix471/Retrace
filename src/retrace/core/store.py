@@ -349,6 +349,10 @@ class SqliteStore:
                 (path, mtime, size),
             )
 
+    def delete_fingerprint(self, path: str) -> None:
+        with self._connection:
+            self._connection.execute("DELETE FROM files WHERE path = ?", (path,))
+
     def meta_get(self, key: str) -> str | None:
         row = self._connection.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
         return None if row is None else row[0]
