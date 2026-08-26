@@ -28,3 +28,6 @@ htmlcov/
 .idea/
 /main.py
 /ANALYSIS_PLAYBOOK.md
+
+# STATUS.md refresh probe cache
+.status-cache/
