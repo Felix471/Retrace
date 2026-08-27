@@ -1,5 +1,5 @@
-# Local-only inputs: verbatim corpus content (incl. an unscrubbed CoT leak)
-# and the survey that quotes it. See DESIGN.md D21 / AUDIT.md §J.
+# Local-only inputs: verbatim corpus content and notes that quote it.
+# Never tracked.
 reference-logs/
 
 # Python bytecode and caches
@@ -29,12 +29,10 @@ htmlcov/
 /main.py
 /ANALYSIS_PLAYBOOK.md
 
-# STATUS.md refresh probe cache
+# Local cache used while refreshing docs
 .status-cache/
 
-# Development-process documents (agent-loop and manual-operation docs):
-# local-only by owner decision, 2026-08-26. They stay on disk and in
-# local history; see RELEASE_RUNBOOK.md Phase 0.3 for the history purge.
+# Local development notes and process documents (not part of the release)
 /CLAUDE.md
 /AUDIT.md
 /TASKS.md
