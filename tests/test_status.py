@@ -3,8 +3,13 @@ from __future__ import annotations
 import importlib.metadata
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 STATUS = ROOT / "STATUS.md"
+pytestmark = pytest.mark.skipif(
+    not STATUS.exists(), reason="local-only process document is absent"
+)
 
 
 def test_status_version_and_table_commands() -> None:

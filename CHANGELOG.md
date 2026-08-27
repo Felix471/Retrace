@@ -16,6 +16,7 @@ Semantic Versioning.
 
 ### Changed
 
+- Development-process documents moved out of the tracked tree; they remain local development tooling.
 - The replay tag panel shows each tag's source and optional confidence.
 - The replay tag form accepts several failure modes at once and saves one tag per mode.
 - Corrected D29 claims to "structured logs (JSON/JSONL, any layout)" and updated the README verdict line.

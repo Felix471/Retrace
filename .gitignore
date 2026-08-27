@@ -31,3 +31,15 @@ htmlcov/
 
 # STATUS.md refresh probe cache
 .status-cache/
+
+# Development-process documents (agent-loop and manual-operation docs):
+# local-only by owner decision, 2026-08-26. They stay on disk and in
+# local history; see RELEASE_RUNBOOK.md Phase 0.3 for the history purge.
+/CLAUDE.md
+/AUDIT.md
+/TASKS.md
+/ORCHESTRATION_LOG.md
+/CHANGES.md
+/GATE_REPORT.md
+/DESIGN.md
+/STATUS.md
