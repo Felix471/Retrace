@@ -51,6 +51,7 @@ retrace = ["adapters/builtin/*.yaml", "ui/*.html", "ui/*.js", "ui/vendor/*.js"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+pythonpath = ["."]
 markers = [
     "slow: tests that build and install into an isolated environment",
 ]

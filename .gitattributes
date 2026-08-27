@@ -1,0 +1,2 @@
+# Fixture and demo files are compared byte-for-byte by tests, so Git must never convert line endings.
+* -text
