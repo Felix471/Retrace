@@ -9,6 +9,7 @@ Semantic Versioning.
 
 ### Added
 
+- Added public no-outbound-network enforcement tests and measured compatibility results.
 - Added `unit: json` discovery (D28), where each JSON document file is one run, as found by the MAST release gate.
 - Added the D27 presentation rule and doc lint in `scripts/check_docs_presentation.py`, enforced in CI.
 - Added the text-log preprocessing recipe in `docs/mapping.md` and a lint rule rejecting arbitrary-log claims.
@@ -16,6 +17,7 @@ Semantic Versioning.
 
 ### Changed
 
+- Linked README privacy and compatibility claims to their public tests and measured outcomes.
 - Development-process documents moved out of the tracked tree; they remain local development tooling.
 - The replay tag panel shows each tag's source and optional confidence.
 - The replay tag form accepts several failure modes at once and saves one tag per mode.

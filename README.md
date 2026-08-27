@@ -14,6 +14,8 @@ Retrace makes zero outbound network requests. It binds 127.0.0.1, serves only yo
 - The cache holds parsed copies of your logs in the user cache directory; delete it to remove them.
 - Sidecars hold your tag notes.
 
+The promise is enforced by the public test suite: `tests/test_no_outbound_network.py` checks for no outbound-capable imports and no external URLs in the served UI; `tests/test_tags.py` verifies source logs are byte-identical after tagging by comparing bytes and mtime; and `tests/test_server.py` verifies the server binds 127.0.0.1 by default.
+
 ## Install
 
 PyPI publication has not happened. From a checkout, install the `retrace-logs`
@@ -38,6 +40,7 @@ Use `retrace-logs view demo/ --no-browser` when a browser must not be opened.
 
 tested against real AG2 and HyperAgent traces from the MAST corpus (config-only); free-text logs are out of scope in v1.
 (HyperAgent traces ingest as content-only events - no agent or turn fields exist in the source.)
+Measured results: [docs/compatibility.md](docs/compatibility.md).
 
 The batch view lists runs, outcomes, costs, metadata filters and groups, and the
 MAST tag distribution. It is the starting point for opening or selecting runs.
@@ -77,6 +80,10 @@ Shipped builtins are `builtin:ag2` (one JSON document per run, `unit: json`),
 (one JSONL line per run).
 
 Screenshots: pending (the project owner will capture them).
+
+## How it was built
+
+Built with heavy AI assistance under a review-gated workflow.
 
 ## License
 

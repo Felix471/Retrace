@@ -53,6 +53,16 @@ def test_readme_has_local_privacy_promise_verbatim() -> None:
     assert README_LOCAL_PROMISE in text
 
 
+def test_public_compatibility_page_has_measured_results() -> None:
+    compatibility = ROOT / "docs" / "compatibility.md"
+    assert compatibility.is_file()
+    text = compatibility.read_text(encoding="ascii")
+    for value in ("7,184", "44,102", "873,441", "100%"):
+        assert value in text
+    readme = (ROOT / "README.md").read_text(encoding="ascii")
+    assert "docs/compatibility.md" in readme
+
+
 def test_readme_quickstart_check_command_executes() -> None:
     text = (ROOT / "README.md").read_text(encoding="ascii")
     section = text.split("## 60-second quickstart", 1)[1].split("\n## ", 1)[0]
