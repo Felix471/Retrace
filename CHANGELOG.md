@@ -25,6 +25,7 @@ Semantic Versioning.
 
 ### Fixed
 
+- Mapping config changes now trigger an automatic re-ingest of all sources instead of only warning.
 - Made the repository root importable under bare `pytest` and pinned byte-level fixture line endings.
 - Purged cached runs during ingest when their source files are no longer discovered.
 - Rendered boolean and numeric group labels as text in the batch UI.

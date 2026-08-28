@@ -14,7 +14,7 @@ from retrace.core.store import SqliteStore
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 
 
-def _flat_config(unit: str = "dir", *, phase: str = "phase"):
+def _flat_config(unit: str = "dir", *, phase: str = "phase", kind: str = "kind"):
     discovery = {"pattern": "case-*", "unit": unit, "events_file": "events.jsonl"}
     if unit == "line":
         discovery = {"pattern": "*.jsonl", "unit": "line"}
@@ -24,7 +24,7 @@ def _flat_config(unit: str = "dir", *, phase: str = "phase"):
         "run": {
             "id": "{dir_name}" if unit != "line" else "id",
             "manifest": "meta.json" if unit != "line" else None,
-            "metadata": {"kind": "kind"},
+            "metadata": {"kind": kind},
             "outcome": "outcome",
         },
         "event": {
@@ -266,8 +266,50 @@ def test_progress_and_config_hash_warning(tmp_path: Path) -> None:
         assert calls == [("case-one", 1, 1)]
         assert store.meta_get("adapter_ref") == "builtin:test"
         assert store.meta_get("adapter_config_hash") == store.meta_get("config_hash")
-        assert ingest(_flat_config(phase="turn"), tmp_path, store).config_hash_warning
-        assert not ingest(_flat_config(phase="turn"), tmp_path, store).config_hash_warning
+        changed = ingest(_flat_config(phase="turn"), tmp_path, store)
+        assert changed.config_hash_warning
+        assert changed.runs_replaced == 1 and changed.runs_skipped_unchanged == 0
+        same = ingest(_flat_config(phase="turn"), tmp_path, store)
+        assert not same.config_hash_warning
+        assert same.runs_replaced == 0 and same.runs_skipped_unchanged == 1
+
+
+def test_config_change_reingests_all_sources(tmp_path: Path) -> None:
+    _tree(tmp_path)
+    mapping_a = _flat_config()
+    # Mapping B points run.metadata.kind at a different manifest field.
+    mapping_b = _flat_config(kind="outcome")
+    with SqliteStore(tmp_path / "cache.db") as store:
+        first = ingest(mapping_a, tmp_path, store)
+        assert not first.config_hash_warning
+        assert store.list_runs()[0].metadata["kind"] == "demo"
+        second = ingest(mapping_b, tmp_path, store)
+        assert second.config_hash_warning
+        assert second.runs_replaced == 1 and second.runs_skipped_unchanged == 0
+        assert store.list_runs()[0].metadata["kind"] == "ok"
+        third = ingest(mapping_b, tmp_path, store)
+        assert not third.config_hash_warning
+        assert third.runs_replaced == 0 and third.runs_skipped_unchanged == 1
+        assert store.list_runs()[0].metadata["kind"] == "ok"
+
+
+def test_config_hash_kept_when_reingest_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _tree(tmp_path)
+    with SqliteStore(tmp_path / "cache.db") as store:
+        ingest(_flat_config(), tmp_path, store)
+        old_hash = store.meta_get("config_hash")
+
+        def boom(*_args, **_kwargs):
+            raise RuntimeError("disk full")
+
+        monkeypatch.setattr(store, "insert_run", boom)
+        with pytest.raises(RuntimeError):
+            ingest(_flat_config(phase="turn"), tmp_path, store)
+        assert store.meta_get("config_hash") == old_hash
+        monkeypatch.undo()
+        retry = ingest(_flat_config(phase="turn"), tmp_path, store)
+        assert retry.config_hash_warning and retry.runs_skipped_unchanged == 0
+        assert store.meta_get("config_hash") != old_hash
 
 
 def test_flat_line_form_is_rejected(tmp_path: Path) -> None:

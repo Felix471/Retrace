@@ -321,6 +321,10 @@ def ingest(
     digest = _config_hash(config)
     old_digest = store.meta_get("config_hash")
     report.config_hash_warning = old_digest is not None and old_digest != digest
+    # A changed mapping config invalidates every cached run: force a full
+    # re-ingest. The new digest is only written after the loops below finish,
+    # so a failure leaves the old digest in place and the next run retries.
+    reingest = reingest or report.config_hash_warning
     experiment_id = stable_root_hash(root)
     known_fingerprints = store.fingerprints()
     existing = {run.id: run for run in store.list_runs()}
