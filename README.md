@@ -16,6 +16,22 @@ Retrace makes zero outbound network requests. It binds 127.0.0.1, serves only yo
 
 The promise is enforced by the public test suite: `tests/test_no_outbound_network.py` checks for no outbound-capable imports and no external URLs in the served UI; `tests/test_tags.py` verifies source logs are byte-identical after tagging by comparing bytes and mtime; and `tests/test_server.py` verifies the server binds 127.0.0.1 by default.
 
+## What it looks like
+
+**Batch table** - filter, sort, and group runs by outcome or metadata:
+
+![Batch table](docs/images/batch_table.png)
+
+**Replay** - step through a run turn by turn; warning and repair banners
+flag ingest issues at a glance:
+
+![Replay with repair banner](docs/images/replay_repair.png)
+
+**Compare** - side-by-side structural alignment of two runs with a
+divergence gutter:
+
+![Compare view](docs/images/compare_view.png)
+
 ## Install
 
 PyPI publication has not happened. From a checkout, install the `retrace-logs`
@@ -78,8 +94,6 @@ logging defects the tool repairs and flags; the game domain is irrelevant.
 Shipped builtins are `builtin:ag2` (one JSON document per run, `unit: json`),
 `builtin:support_pipeline` (one directory per run), and `builtin:avalon`
 (one JSONL line per run).
-
-Screenshots: pending (the project owner will capture them).
 
 ## How it was built
 
