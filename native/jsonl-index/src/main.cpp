@@ -9,30 +9,44 @@
 namespace {
 
 void print_usage() {
-    std::cerr << "Usage: retrace-jsonl-index <input.jsonl> [-o <output>]\n";
+    std::cerr
+        << "Usage: retrace-jsonl-index <input.jsonl> [-o <output>] [--validate]\n";
 }
 
 }  // namespace
 
 int main(int argc, char* argv[]) {
-    if (argc != 2 && argc != 4) {
+    if (argc < 2) {
         print_usage();
         return 2;
     }
 
     const std::filesystem::path input(argv[1]);
-    std::filesystem::path output;
+    std::filesystem::path output = input;
+    output += ".ridx";
+    bool output_set = false;
+    bool validate = false;
 
-    if (argc == 4) {
-        const std::string option(argv[2]);
-        if ((option != "-o" && option != "--output") || argv[3][0] == '\0') {
+    for (int index = 2; index < argc; ++index) {
+        const std::string option(argv[index]);
+        if (option == "--validate") {
+            if (validate) {
+                print_usage();
+                return 2;
+            }
+            validate = true;
+        } else if (option == "-o" || option == "--output") {
+            if (output_set || index + 1 >= argc || argv[index + 1][0] == '\0') {
+                print_usage();
+                return 2;
+            }
+            output = std::filesystem::path(argv[index + 1]);
+            output_set = true;
+            ++index;
+        } else {
             print_usage();
             return 2;
         }
-        output = std::filesystem::path(argv[3]);
-    } else {
-        output = input;
-        output += ".ridx";
     }
 
     std::error_code equivalence_error;
@@ -42,26 +56,27 @@ int main(int argc, char* argv[]) {
     }
 
     std::string error;
-    const auto index = retrace::jsonl_index::build_index(input, error);
-    if (!index.has_value()) {
+    const auto result = retrace::jsonl_index::build_index(input, error, validate);
+    if (!result.has_value()) {
         std::cerr << "retrace-jsonl-index: " << error << '\n';
         return 2;
     }
 
-    if (!retrace::jsonl_index::write_index(output, *index, error)) {
+    if (!retrace::jsonl_index::write_index(output, *result, error)) {
         std::cerr << "retrace-jsonl-index: " << error << '\n';
         return 3;
     }
 
     std::uint64_t ok_count = 0U;
-    for (const auto& record : index->records) {
+    for (const auto& record : result->records) {
         if (record.status ==
             static_cast<std::uint8_t>(retrace::jsonl_index::LineStatus::ok_object)) {
             ++ok_count;
         }
     }
 
-    std::cout << index->header.record_count << " lines, " << ok_count
-              << " objects -> " << output.u8string() << '\n';
+    std::cout << result->header.record_count << " lines, " << ok_count
+              << " objects, " << (validate ? "validated" : "fast") << " -> "
+              << output.u8string() << '\n';
     return 0;
 }
