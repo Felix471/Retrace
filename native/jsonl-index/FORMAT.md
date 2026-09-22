@@ -52,8 +52,9 @@ has offset 0 and its byte length includes the three BOM bytes.
 
 Classification first validates UTF-8 strictly. Blank detection treats space,
 tab, line feed, carriage return, form feed, and vertical tab as whitespace.
-Non-blank valid UTF-8 is parsed as JSON and then classified by whether its
-top-level value is an object.
+Non-blank valid UTF-8 is validated as JSON. After validation, a line is an
+object when its first byte after JSON whitespace is `{`; otherwise it is a
+non-object.
 
 ## Source modification time
 
