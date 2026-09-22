@@ -18,6 +18,7 @@ from retrace.adapters.discovery import (
     discover_runs_with_report,
     is_tag_sidecar,
     iter_jsonl_records,
+    iter_jsonl_records_indexed,
 )
 from retrace.adapters.extract import ExtractionStats, Extractor, FieldStats
 from retrace.adapters.mapping_schema import EventConfig, MappingConfig, MappingConfigError
@@ -403,7 +404,7 @@ def ingest(
                 stat = file_path.stat()
                 store.set_fingerprint(source_path, stat.st_mtime, stat.st_size)
                 continue
-            for line_no, item in iter_jsonl_records(file_path):
+            for line_no, item in iter_jsonl_records_indexed(file_path):
                 source = by_line.get(line_no)
                 if source is None or not isinstance(item, dict):
                     continue

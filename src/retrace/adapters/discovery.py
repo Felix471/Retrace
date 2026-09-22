@@ -15,6 +15,7 @@ import jmespath
 from jmespath.exceptions import JMESPathError
 
 from retrace.adapters.mapping_schema import MappingConfig, MappingConfigError
+from retrace.core.jsonl_index import STATUS_BLANK, load_index
 
 __all__ = [
     "DiscoveryError",
@@ -25,6 +26,7 @@ __all__ = [
     "discover_runs_with_report",
     "is_tag_sidecar",
     "iter_jsonl_records",
+    "iter_jsonl_records_indexed",
     "load_json_document",
 ]
 
@@ -151,27 +153,50 @@ def _find_candidates(config: MappingConfig, root: Path) -> list[_Candidate]:
     return sorted(candidates, key=lambda candidate: candidate.relative_path)
 
 
+def _classify_line(line_no: int, raw_line: bytes) -> JsonlRecord | None:
+    try:
+        line = raw_line.decode("utf-8-sig" if line_no == 1 else "utf-8")
+    except UnicodeDecodeError as error:
+        return line_no, f"invalid UTF-8: {error}"
+    if not line.strip():
+        return None
+    try:
+        value = json.loads(line)
+    except JSONDecodeError as error:
+        return line_no, f"invalid JSON: {error.msg}"
+    if not isinstance(value, dict):
+        return line_no, "invalid JSON: expected an object"
+    return line_no, value
+
+
 def iter_jsonl_records(path: Path) -> Iterator[JsonlRecord]:
     """Yield each usable JSON object or a reason for a bad physical line."""
 
     with path.open("rb") as stream:
         for line_no, raw_line in enumerate(stream, start=1):
-            try:
-                line = raw_line.decode("utf-8-sig" if line_no == 1 else "utf-8")
-            except UnicodeDecodeError as error:
-                yield line_no, f"invalid UTF-8: {error}"
+            classified = _classify_line(line_no, raw_line)
+            if classified is not None:
+                yield classified
+
+
+def iter_jsonl_records_indexed(path: Path) -> Iterator[JsonlRecord]:
+    """Yield JSON Lines records using a valid sidecar index when available."""
+    index = load_index(path)
+    if index is None:
+        yield from iter_jsonl_records(path)
+        return
+
+    with path.open("rb") as stream:
+        for entry in index.entries:
+            if entry.status == STATUS_BLANK:
                 continue
-            if not line.strip():
-                continue
-            try:
-                value = json.loads(line)
-            except JSONDecodeError as error:
-                yield line_no, f"invalid JSON: {error.msg}"
-                continue
-            if not isinstance(value, dict):
-                yield line_no, "invalid JSON: expected an object"
-                continue
-            yield line_no, value
+            stream.seek(entry.byte_offset)
+            raw_line = stream.read(entry.byte_length)
+            if len(raw_line) != entry.byte_length:
+                raise OSError(f"source changed while reading indexed line {entry.line_no}")
+            classified = _classify_line(entry.line_no, raw_line)
+            if classified is not None:
+                yield classified
 
 
 def load_json_document(path: Path) -> tuple[dict[str, object] | None, str | None]:
