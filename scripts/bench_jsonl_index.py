@@ -13,6 +13,7 @@ import random
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -21,7 +22,17 @@ from pathlib import Path
 from typing import TypeVar
 
 from retrace.adapters.discovery import iter_jsonl_records
-from retrace.core.jsonl_index import JsonlIndex, find_indexer, index_path, load_index
+from retrace.adapters.mapping_schema import MappingConfig
+from retrace.adapters.registry import resolve_config
+from retrace.core.ingest import ingest
+from retrace.core.jsonl_index import (
+    STATUS_OK,
+    JsonlIndex,
+    find_indexer,
+    index_path,
+    load_index,
+)
+from retrace.core.store import SqliteStore
 
 DEFAULT_RUNS = 3
 DEFAULT_SAMPLES = 1000
@@ -49,6 +60,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--samples", type=int, default=DEFAULT_SAMPLES)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--keep-index", action="store_true")
+    parser.add_argument("--ingest-config", type=Path, help="line-unit mapping YAML")
     return parser
 
 
@@ -81,15 +93,17 @@ def _sample_indices(index: JsonlIndex, samples: int, seed: int) -> list[int]:
     return [rng.randrange(len(index)) for _ in range(samples)]
 
 
-def _python_object_at(path: Path, ordinal: int) -> dict[str, object]:
-    object_ordinal = 0
-    for _, item in iter_jsonl_records(path):
-        if not isinstance(item, dict):
-            continue
-        if object_ordinal == ordinal:
-            return item
-        object_ordinal += 1
-    raise RuntimeError(f"Python reader did not yield object record {ordinal}")
+def _fetch_lines(path: Path, wanted_lines: set[int]) -> dict[int, dict[str, object] | str]:
+    return {line_no: item for line_no, item in iter_jsonl_records(path) if line_no in wanted_lines}
+
+
+def _ingest_once(config: MappingConfig, path: Path) -> tuple[float, int, int]:
+    with (
+        tempfile.TemporaryDirectory(prefix="retrace-jsonl-index-bench-") as temporary,
+        SqliteStore(Path(temporary) / "benchmark.db") as store,
+    ):
+        elapsed, report = _timed(lambda: ingest(config, path, store))
+    return elapsed, report.runs_ingested, len(report.line_failures)
 
 
 def _format_timings(timings: tuple[float, ...]) -> str:
@@ -103,25 +117,37 @@ def _print_report(
     object_count: int,
     bad_line_count: int,
     measurements: Sequence[Measurement],
+    ingest_counts: tuple[tuple[int, int], tuple[int, int]] | None,
 ) -> None:
     python_version = platform.python_version()
-    print(
-        f"Machine: {platform.platform()} | Python {python_version} | "
-        f"CPU count: {os.cpu_count()}"
-    )
+    print(f"Machine: {platform.platform()} | Python {python_version} | CPU count: {os.cpu_count()}")
     print(f"Date (UTC): {datetime.now(UTC):%Y-%m-%d}")
     print(f"Input: {path}")
     print(f"File size: {source_size} bytes ({source_size / (1024 * 1024):.3f} MiB)")
     print(f"Physical line count: {len(index.entries)}")
     print(f"Object record count: {object_count}")
     print(f"Bad-line count: {bad_line_count}")
+    if ingest_counts is None:
+        print("ingest measurement skipped (no --ingest-config)")
+    else:
+        without_counts, with_counts = ingest_counts
+        print(
+            "Line-unit ingest without index: "
+            f"{without_counts[0]} runs ingested, {without_counts[1]} line failures"
+        )
+        print(
+            "Line-unit ingest with index: "
+            f"{with_counts[0]} runs ingested, {with_counts[1]} line failures"
+        )
     print()
     print("| Measurement | Median wall time (s) |")
     print("| --- | ---: |")
     for measurement in measurements:
         print(f"| {measurement.name} | {measurement.median:.3f} |")
-    ratio = measurements[0].median / measurements[1].median
-    print(f"Ratio (a)/(b): {ratio:.2f}")
+    print(f"Ratio (a)/(b): {measurements[0].median / measurements[1].median:.2f}")
+    print(f"Ratio (d)/(c): {measurements[3].median / measurements[2].median:.2f}")
+    if ingest_counts is not None:
+        print(f"Ratio (e without)/(e with): {measurements[4].median / measurements[5].median:.2f}")
     print()
     for measurement in measurements:
         print(f"Raw timings - {measurement.name} (s): {_format_timings(measurement.timings)}")
@@ -134,6 +160,7 @@ def _run(args: argparse.Namespace, indexer: Path) -> int:
     python_timings: list[float] = []
     build_timings: list[float] = []
     access_timings: list[float] = []
+    fetch_timings: list[float] = []
     object_count = 0
     bad_line_count = 0
     cleanup_message = ""
@@ -158,13 +185,8 @@ def _run(args: argparse.Namespace, indexer: Path) -> int:
         if index is None:
             raise RuntimeError("could not load the sidecar index after building it")
         sampled = _sample_indices(index, args.samples, args.seed)
-        if sampled:
-            indexed_object = index.record_object(sampled[0])
-            python_object = _python_object_at(path, sampled[0])
-            if indexed_object != python_object:
-                raise RuntimeError(
-                    f"indexed object {sampled[0]} does not match the Python reader"
-                )
+        ok_entries = tuple(entry for entry in index.entries if entry.status == STATUS_OK)
+        wanted_lines = {ok_entries[ordinal].line_no for ordinal in sampled}
 
         def access_records() -> None:
             for ordinal in sampled:
@@ -174,11 +196,71 @@ def _run(args: argparse.Namespace, indexer: Path) -> int:
             elapsed, _ = _timed(access_records)
             access_timings.append(elapsed)
 
-        measurements = (
+        found: dict[int, dict[str, object] | str] = {}
+        for _ in range(args.runs):
+            elapsed, found = _timed(lambda: _fetch_lines(path, wanted_lines))
+            fetch_timings.append(elapsed)
+
+        for ordinal in sampled:
+            line_no = ok_entries[ordinal].line_no
+            if line_no not in found:
+                raise RuntimeError(f"Python reader did not yield line {line_no}")
+            python_object = found[line_no]
+            if index.record_object(ordinal) != python_object:
+                raise RuntimeError(
+                    f"indexed object {ordinal} does not match Python reader line {line_no}"
+                )
+
+        measurements: list[Measurement] = [
             Measurement("Python full pass", tuple(python_timings)),
             Measurement("Indexer build", tuple(build_timings)),
             Measurement(f"Indexed random access, {len(sampled)} records", tuple(access_timings)),
-        )
+            Measurement(
+                f"Python fetch, {len(sampled)} records by line number",
+                tuple(fetch_timings),
+            ),
+        ]
+        ingest_counts: tuple[tuple[int, int], tuple[int, int]] | None = None
+        if args.ingest_config is not None:
+            config, _ = resolve_config(path, explicit=args.ingest_config)
+            if config.run_discovery.unit != "line":
+                raise RuntimeError("--ingest-config must use run_discovery unit 'line'")
+
+            without_timings: list[float] = []
+            without_results: list[tuple[int, int]] = []
+            for _ in range(args.runs):
+                sidecar.unlink(missing_ok=True)
+                elapsed, runs_ingested, line_failures = _ingest_once(config, path)
+                without_timings.append(elapsed)
+                without_results.append((runs_ingested, line_failures))
+
+            _build_index(indexer, path, sidecar)
+            if load_index(path) is None:
+                raise RuntimeError("native indexer did not produce a valid index for ingest")
+            with_timings: list[float] = []
+            with_results: list[tuple[int, int]] = []
+            for _ in range(args.runs):
+                elapsed, runs_ingested, line_failures = _ingest_once(config, path)
+                with_timings.append(elapsed)
+                with_results.append((runs_ingested, line_failures))
+
+            if len(set(without_results)) != 1 or len(set(with_results)) != 1:
+                raise RuntimeError("line-unit ingest counts changed between runs")
+            without_counts = without_results[0]
+            with_counts = with_results[0]
+            if without_counts[0] != with_counts[0]:
+                raise RuntimeError(
+                    "line-unit ingest run counts differ: "
+                    f"without index {without_counts[0]}, with index {with_counts[0]}"
+                )
+            ingest_counts = (without_counts, with_counts)
+            measurements.extend(
+                [
+                    Measurement("Line-unit ingest without index", tuple(without_timings)),
+                    Measurement("Line-unit ingest with index", tuple(with_timings)),
+                ]
+            )
+
         _print_report(
             path,
             initial_stat.st_size,
@@ -186,6 +268,7 @@ def _run(args: argparse.Namespace, indexer: Path) -> int:
             object_count,
             bad_line_count,
             measurements,
+            ingest_counts,
         )
         return 0
     finally:
