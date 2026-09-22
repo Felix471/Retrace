@@ -548,4 +548,37 @@ TEST(JsonlIndexerTest, RoundTripPreservesModeFlag) {
     }
 }
 
+TEST(JsonlIndexerTest, EmptyInputViewProducesNoRecords) {
+    TemporaryDirectory directory;
+    const auto source = directory.path() / "view-empty.jsonl";
+    write_text(source, "");
+
+    const auto fast = require_build(source, false);
+    const auto validated = require_build(source, true);
+
+    EXPECT_TRUE(fast.records.empty());
+    EXPECT_EQ(fast.header.record_count, 0U);
+    EXPECT_TRUE(validated.records.empty());
+    EXPECT_EQ(validated.header.record_count, 0U);
+}
+
+TEST(JsonlIndexerTest, OneByteInputUsesModeSpecificStatus) {
+    TemporaryDirectory directory;
+    const auto source = directory.path() / "one-byte.jsonl";
+    write_text(source, "{");
+
+    const auto fast = require_build(source, false);
+    const auto validated = require_build(source, true);
+
+    ASSERT_EQ(fast.records.size(), 1U);
+    ASSERT_EQ(validated.records.size(), 1U);
+    EXPECT_EQ(fast.records[0].byte_offset, 0U);
+    EXPECT_EQ(fast.records[0].byte_length, 1U);
+    EXPECT_EQ(fast.records[0].status, status(index::LineStatus::ok_object));
+    EXPECT_EQ(validated.records[0].byte_offset, 0U);
+    EXPECT_EQ(validated.records[0].byte_length, 1U);
+    EXPECT_EQ(validated.records[0].status,
+              status(index::LineStatus::invalid_json));
+}
+
 }  // namespace

@@ -1,8 +1,15 @@
+#ifdef _WIN32
+#ifndef _CRT_SECURE_NO_WARNINGS
+#define _CRT_SECURE_NO_WARNINGS
+#endif
+#endif
+
 #include "index_format.hpp"
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <exception>
 #include <fstream>
@@ -19,7 +26,10 @@
 #endif
 #include <windows.h>
 #else
+#include <fcntl.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 namespace retrace::jsonl_index {
@@ -28,6 +38,76 @@ namespace {
 constexpr std::uint8_t status_value(LineStatus status) {
     return static_cast<std::uint8_t>(status);
 }
+
+#ifndef _WIN32
+class PosixMappedFile {
+public:
+    PosixMappedFile() = default;
+    PosixMappedFile(const PosixMappedFile&) = delete;
+    PosixMappedFile& operator=(const PosixMappedFile&) = delete;
+
+    ~PosixMappedFile() {
+        if (data_ != nullptr) {
+            static_cast<void>(
+                ::munmap(const_cast<std::uint8_t*>(data_), size_));
+        }
+        if (descriptor_ >= 0) {
+            static_cast<void>(::close(descriptor_));
+        }
+    }
+
+    bool open(const std::filesystem::path& path) {
+        descriptor_ = ::open(path.c_str(), O_RDONLY);
+        if (descriptor_ < 0) {
+            return false;
+        }
+
+        struct stat metadata {};
+        if (::fstat(descriptor_, &metadata) != 0 || metadata.st_size < 0) {
+            static_cast<void>(::close(descriptor_));
+            descriptor_ = -1;
+            return false;
+        }
+
+        const std::uintmax_t file_size =
+            static_cast<std::uintmax_t>(metadata.st_size);
+        if (file_size > static_cast<std::uintmax_t>(
+                            std::numeric_limits<std::size_t>::max())) {
+            static_cast<void>(::close(descriptor_));
+            descriptor_ = -1;
+            return false;
+        }
+        size_ = static_cast<std::size_t>(file_size);
+        if (size_ == 0U) {
+            return true;
+        }
+
+        void* const mapping =
+            ::mmap(nullptr, size_, PROT_READ, MAP_PRIVATE, descriptor_, 0);
+        if (mapping == MAP_FAILED) {
+            size_ = 0U;
+            static_cast<void>(::close(descriptor_));
+            descriptor_ = -1;
+            return false;
+        }
+        data_ = static_cast<const std::uint8_t*>(mapping);
+        return true;
+    }
+
+    const std::uint8_t* data() const {
+        return data_;
+    }
+
+    std::size_t size() const {
+        return size_;
+    }
+
+private:
+    int descriptor_ = -1;
+    const std::uint8_t* data_ = nullptr;
+    std::size_t size_ = 0U;
+};
+#endif
 
 bool is_ascii_whitespace(std::uint8_t byte) {
     return byte == static_cast<std::uint8_t>(' ') ||
@@ -154,26 +234,55 @@ LineStatus classify_line_validated(
     }
 }
 
-void write_u16(std::ostream& stream, std::uint16_t value) {
+void write_u8(
+    std::vector<char>& buffer,
+    std::size_t& position,
+    std::uint8_t value) {
+    buffer[position] = static_cast<char>(value);
+    ++position;
+}
+
+void write_u16(
+    std::vector<char>& buffer,
+    std::size_t& position,
+    std::uint16_t value) {
     for (unsigned int shift = 0U; shift < 16U; shift += 8U) {
-        stream.put(static_cast<char>((value >> shift) & 0xFFU));
+        write_u8(
+            buffer,
+            position,
+            static_cast<std::uint8_t>((value >> shift) & 0xFFU));
     }
 }
 
-void write_u32(std::ostream& stream, std::uint32_t value) {
+void write_u32(
+    std::vector<char>& buffer,
+    std::size_t& position,
+    std::uint32_t value) {
     for (unsigned int shift = 0U; shift < 32U; shift += 8U) {
-        stream.put(static_cast<char>((value >> shift) & 0xFFU));
+        write_u8(
+            buffer,
+            position,
+            static_cast<std::uint8_t>((value >> shift) & 0xFFU));
     }
 }
 
-void write_u64(std::ostream& stream, std::uint64_t value) {
+void write_u64(
+    std::vector<char>& buffer,
+    std::size_t& position,
+    std::uint64_t value) {
     for (unsigned int shift = 0U; shift < 64U; shift += 8U) {
-        stream.put(static_cast<char>((value >> shift) & 0xFFU));
+        write_u8(
+            buffer,
+            position,
+            static_cast<std::uint8_t>((value >> shift) & 0xFFU));
     }
 }
 
-void write_i64(std::ostream& stream, std::int64_t value) {
-    write_u64(stream, static_cast<std::uint64_t>(value));
+void write_i64(
+    std::vector<char>& buffer,
+    std::size_t& position,
+    std::int64_t value) {
+    write_u64(buffer, position, static_cast<std::uint64_t>(value));
 }
 
 bool read_exact(std::istream& stream, char* destination, std::size_t size) {
@@ -268,16 +377,14 @@ std::optional<IndexResult> build_index_impl(
         return std::nullopt;
     }
 
-    const std::uintmax_t file_size =
+    const std::uintmax_t metadata_size =
         std::filesystem::file_size(source, filesystem_error);
     if (filesystem_error) {
         error = "cannot determine input size: " + path_for_error(source);
         return std::nullopt;
     }
-    if (file_size > static_cast<std::uintmax_t>(
-                        std::numeric_limits<std::size_t>::max()) ||
-        file_size > static_cast<std::uintmax_t>(
-                        std::numeric_limits<std::streamsize>::max())) {
+    if (metadata_size > static_cast<std::uintmax_t>(
+                            std::numeric_limits<std::size_t>::max())) {
         error = "input is too large to read: " + path_for_error(source);
         return std::nullopt;
     }
@@ -289,39 +396,61 @@ std::optional<IndexResult> build_index_impl(
         return std::nullopt;
     }
 
-    std::ifstream stream(source, std::ios::binary);
-    if (!stream.is_open()) {
-        error = "cannot open input: " + path_for_error(source);
-        return std::nullopt;
-    }
+    std::vector<std::uint8_t> bytes;
+    const std::uint8_t* data = nullptr;
+    std::size_t data_size = 0U;
 
-    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(file_size));
-    if (!bytes.empty()) {
-        stream.read(reinterpret_cast<char*>(bytes.data()),
-                    static_cast<std::streamsize>(bytes.size()));
-        if (stream.gcount() != static_cast<std::streamsize>(bytes.size()) ||
-            stream.bad()) {
-            error = "failed while reading input: " + path_for_error(source);
+#ifndef _WIN32
+    PosixMappedFile mapping;
+    const bool mapped = mapping.open(source);
+    if (mapped) {
+        data = mapping.data();
+        data_size = mapping.size();
+    } else
+#endif
+    {
+        if (metadata_size > static_cast<std::uintmax_t>(
+                                std::numeric_limits<std::streamsize>::max())) {
+            error = "input is too large to read: " + path_for_error(source);
             return std::nullopt;
         }
+
+        std::ifstream stream(source, std::ios::binary);
+        if (!stream.is_open()) {
+            error = "cannot open input: " + path_for_error(source);
+            return std::nullopt;
+        }
+
+        bytes.resize(static_cast<std::size_t>(metadata_size));
+        if (!bytes.empty()) {
+            stream.read(reinterpret_cast<char*>(bytes.data()),
+                        static_cast<std::streamsize>(bytes.size()));
+            if (stream.gcount() != static_cast<std::streamsize>(bytes.size()) ||
+                stream.bad()) {
+                error = "failed while reading input: " + path_for_error(source);
+                return std::nullopt;
+            }
+        }
+        data = bytes.data();
+        data_size = bytes.size();
     }
 
     IndexResult result;
-    result.header.source_size = static_cast<std::uint64_t>(file_size);
+    result.header.source_size = static_cast<std::uint64_t>(data_size);
     result.header.source_mtime_ns = modification_time;
     result.header.flags = validate ? kFlagValidated : 0U;
 
     std::size_t line_start = 0U;
-    while (line_start < bytes.size()) {
+    while (line_start < data_size) {
         const void* newline_raw = std::memchr(
-            bytes.data() + line_start,
+            data + line_start,
             static_cast<int>('\n'),
-            bytes.size() - line_start);
+            data_size - line_start);
         const auto* newline = static_cast<const std::uint8_t*>(newline_raw);
         const std::size_t line_end =
             newline == nullptr
-                ? bytes.size()
-                : static_cast<std::size_t>(newline - bytes.data()) + 1U;
+                ? data_size
+                : static_cast<std::size_t>(newline - data) + 1U;
         const std::uint64_t line_length =
             static_cast<std::uint64_t>(line_end - line_start);
         if (line_length > std::numeric_limits<std::uint32_t>::max()) {
@@ -330,8 +459,8 @@ std::optional<IndexResult> build_index_impl(
             return std::nullopt;
         }
 
-        const std::uint8_t* begin = bytes.data() + line_start;
-        const std::uint8_t* end = bytes.data() + line_end;
+        const std::uint8_t* begin = data + line_start;
+        const std::uint8_t* end = data + line_end;
         const LineStatus status = validate
                                       ? classify_line_validated(
                                             begin, end, result.records.empty())
@@ -364,34 +493,61 @@ bool write_index_impl(
         return false;
     }
 
-    std::ofstream stream(out, std::ios::binary | std::ios::trunc);
-    if (!stream.is_open()) {
+    constexpr std::size_t header_size =
+        static_cast<std::size_t>(kHeaderSize);
+    constexpr std::size_t record_size =
+        static_cast<std::size_t>(kRecordSize);
+    if (index.records.size() >
+        (std::numeric_limits<std::size_t>::max() - header_size) /
+            record_size) {
+        error = "index is too large to serialize";
+        return false;
+    }
+
+    const std::size_t output_size =
+        header_size + record_size * index.records.size();
+    std::vector<char> buffer(output_size);
+    std::size_t position = 0U;
+
+    for (const char byte : kMagic) {
+        write_u8(
+            buffer,
+            position,
+            static_cast<std::uint8_t>(static_cast<unsigned char>(byte)));
+    }
+    write_u16(buffer, position, kFormatVersion);
+    write_u16(buffer, position, kHeaderSize);
+    write_u64(buffer, position, index.header.source_size);
+    write_i64(buffer, position, index.header.source_mtime_ns);
+    write_u64(buffer, position, index.header.record_count);
+    write_u32(buffer, position, index.header.flags);
+    write_u32(buffer, position, 0U);
+
+    for (const Record& record : index.records) {
+        write_u64(buffer, position, record.byte_offset);
+        write_u32(buffer, position, record.byte_length);
+        write_u8(buffer, position, record.status);
+    }
+
+#ifdef _WIN32
+    std::FILE* const stream = ::_wfopen(out.c_str(), L"wb");
+#else
+    std::FILE* const stream = std::fopen(out.c_str(), "wb");
+#endif
+    if (stream == nullptr) {
         error = "cannot open output: " + path_for_error(out);
         return false;
     }
 
-    stream.write(kMagic.data(), static_cast<std::streamsize>(kMagic.size()));
-    write_u16(stream, kFormatVersion);
-    write_u16(stream, kHeaderSize);
-    write_u64(stream, index.header.source_size);
-    write_i64(stream, index.header.source_mtime_ns);
-    write_u64(stream, index.header.record_count);
-    write_u32(stream, index.header.flags);
-    write_u32(stream, 0U);
-
-    for (const Record& record : index.records) {
-        write_u64(stream, record.byte_offset);
-        write_u32(stream, record.byte_length);
-        stream.put(static_cast<char>(record.status));
-    }
-
-    stream.flush();
-    if (!stream) {
+    const bool write_succeeded =
+        std::fwrite(buffer.data(), 1U, buffer.size(), stream) == buffer.size();
+    const bool flush_succeeded = std::fflush(stream) == 0;
+    const bool close_succeeded = std::fclose(stream) == 0;
+    if (!write_succeeded || !flush_succeeded) {
         error = "failed while writing output: " + path_for_error(out);
         return false;
     }
-    stream.close();
-    if (!stream) {
+    if (!close_succeeded) {
         error = "failed while closing output: " + path_for_error(out);
         return false;
     }
