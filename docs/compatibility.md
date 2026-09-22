@@ -40,27 +40,34 @@ is 627 of 1,642 annotated traces, or 38.2%.
 
 The optional native indexer (`native/jsonl-index`) writes a sidecar of byte
 offsets so record access seeks instead of re-parsing; the build cost is paid
-once per file. Measured 2026-09-22 on the same corpus, WSL2 Ubuntu 22.04.3
-(kernel 6.18.33.2), AMD Ryzen 9 7950X3D, Python 3.11.16, inputs and repository
-on ext4, medians of three runs, 1,000 sampled records (all 223 for HyperAgent).
-Inputs were built with one JSON document per line from `AG2/**/*.json`
-(7,184 documents) and `HyperAgent/*.json` (223 documents), tag sidecars
-excluded, compact `json.dumps` with `ensure_ascii=False`; neither is committed.
-No single file in the corpus approaches 400 MB.
+once per file. The default build classifies lines by their first byte only;
+`--validate` additionally checks UTF-8 and JSON syntax. Measured 2026-09-22 on
+WSL2 Ubuntu 22.04.3 (kernel 6.18.33.2), AMD Ryzen 9 7950X3D, Python 3.11.16,
+inputs and repository on ext4, medians of three runs, 1,000 sampled records
+(all 223 for HyperAgent). Corpus inputs were built with one JSON document per
+line from `AG2/**/*.json` (7,184 documents), `HyperAgent/*.json` (223
+documents), and the `MAD_full_dataset.json` array (1,642 records), tag sidecars
+excluded, compact `json.dumps` with `ensure_ascii=False`. The synthetic row is
+a generated file of 641,649 objects with no corpus content. None of the inputs
+is committed.
 
-| Measurement | AG2 (7,184 lines, 45.0 MiB) | HyperAgent (223 lines, 42.4 MiB) |
-| --- | ---: | ---: |
-| (a) Python full sequential pass | 0.111 s | 0.099 s |
-| (b) Native index build | 0.139 s | 0.139 s |
-| (c) Indexed random access, sampled records | 0.019 s | 0.075 s |
-| (d) Python fetch of the same records by line number, one full pass | 0.117 s | 0.153 s |
-| (e) Line-unit ingest without index | 16.212 s | 19.524 s |
-| (e) Line-unit ingest with index | 16.329 s | 19.542 s |
-| Ratio (a)/(b) | 0.80 | 0.71 |
-| Ratio (d)/(c) | 6.29 | 2.04 |
-| Ratio (e without)/(e with) | 0.99 | 1.00 |
+| Measurement | AG2 (45.0 MiB) | HyperAgent (42.4 MiB) | MAD (189.6 MiB) | Synthetic (400.0 MiB) |
+| --- | ---: | ---: | ---: | ---: |
+| (a) Python full sequential pass | 0.134 s | 0.102 s | 0.479 s | 1.404 s |
+| (b) Native index build, default | 0.038 s | 0.025 s | 0.157 s | 0.330 s |
+| (b2) Native index build, `--validate` | 0.163 s | 0.139 s | 0.685 s | 1.522 s |
+| (c) Indexed random access, sampled records | 0.021 s | 0.074 s | 0.217 s | 0.009 s |
+| (d) Python fetch of the same records by line number, one pass | 0.124 s | 0.164 s | 0.676 s | 1.427 s |
+| (e) Line-unit ingest without index | 17.415 s | 19.555 s | not run | not run |
+| (e) Line-unit ingest with index | 16.212 s | 20.231 s | not run | not run |
+| Ratio (a)/(b) | 3.54 | 4.01 | 3.06 | 4.25 |
+| Ratio (a)/(b2) | 0.82 | 0.74 | 0.70 | 0.92 |
+| Ratio (d)/(c) | 5.96 | 2.22 | 3.12 | 154.92 |
+| Ratio (e without)/(e with) | 1.07 | 0.97 | not run | not run |
 
-Reading the index file is not the cost in line-unit ingest: extraction and
-SQLite writes dominate (e), so the wired call site is unchanged in wall time.
-The index build is slower than one Python pass on these files. Reproduce with
-`python scripts/bench_jsonl_index.py <file.jsonl> --ingest-config <mapping.yaml>`.
+The validated build is slower than one Python pass on every input. Line-unit
+ingest needs an array-valued event source, which the MAD and synthetic inputs
+do not have, so (e) was not run for them. Reading the index is not the cost in
+line-unit ingest: extraction and SQLite writes dominate (e), and the two ingest
+ratios are within run-to-run noise. Reproduce with
+`python scripts/bench_jsonl_index.py <file.jsonl> [--ingest-config <mapping.yaml>]`.
