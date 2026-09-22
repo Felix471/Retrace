@@ -74,3 +74,42 @@ jobs:
 
       - name: Build and smoke installed wheel from outside repository
         run: python scripts/wheel_smoke.py
+
+  native:
+    name: Native JSONL indexer
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Configure
+        run: cmake -S native/jsonl-index -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Run C++ tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Install binary on PATH
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          install -m 0755 build/retrace-jsonl-index "$HOME/.local/bin/retrace-jsonl-index"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install package and development tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[dev]"
+
+      - name: Run Python index tests against the binary
+        run: |
+          command -v retrace-jsonl-index
+          pytest tests/test_jsonl_index.py -v | tee pytest-native.log
+          grep -q "test_real_binary_parity PASSED" pytest-native.log
