@@ -6,16 +6,18 @@ structures or depend on host byte order or structure packing.
 
 ## Header
 
-The header is exactly 32 bytes.
+The header is exactly 40 bytes.
 
 | Offset | Size | Field |
 | ---: | ---: | --- |
 | 0 | 4 | Magic, ASCII `RIDX` |
-| 4 | 2 | Unsigned format version, currently 1 |
-| 6 | 2 | Unsigned header size, currently 32 |
+| 4 | 2 | Unsigned format version, currently 2 |
+| 6 | 2 | Unsigned header size, currently 40 |
 | 8 | 8 | Unsigned source file size in bytes |
 | 16 | 8 | Signed source modification time in nanoseconds since the Unix epoch |
 | 24 | 8 | Unsigned physical line count |
+| 32 | 4 | Unsigned flags; bit 0 indicates validated mode |
+| 36 | 4 | Reserved, must be zero |
 
 ## Records
 
@@ -32,11 +34,11 @@ Status codes are:
 
 | Code | Meaning |
 | ---: | --- |
-| 0 | Valid JSON whose top-level value is an object |
-| 1 | Blank after UTF-8 decoding and whitespace stripping |
+| 0 | Object by first non-JSON-whitespace byte |
+| 1 | Blank under the ASCII whitespace rule |
 | 2 | Invalid UTF-8 |
 | 3 | Invalid JSON |
-| 4 | Valid JSON whose top-level value is not an object |
+| 4 | Non-object by first non-JSON-whitespace byte |
 
 ## Physical lines and classification
 
@@ -50,11 +52,21 @@ For the first line only, an initial UTF-8 BOM with bytes `EF BB BF` is removed
 for classification. It remains part of the physical line, so the first record
 has offset 0 and its byte length includes the three BOM bytes.
 
-Classification first validates UTF-8 strictly. Blank detection treats space,
-tab, line feed, carriage return, form feed, and vertical tab as whitespace.
-Non-blank valid UTF-8 is validated as JSON. After validation, a line is an
-object when its first byte after JSON whitespace is `{`; otherwise it is a
-non-object.
+Blank detection treats space, tab, line feed, carriage return, form feed, and
+vertical tab as whitespace. JSON whitespace is space, tab, line feed, and
+carriage return.
+
+When flags bit 0 is clear, the index is in fast mode. Fast mode does not
+validate UTF-8 or JSON. A non-blank line has status 0 when its first byte after
+JSON whitespace is `{`, and status 4 otherwise. Status 0 in a fast index means
+only "object by first byte"; the line may still fail to parse. Statuses 2 and 3
+never appear in a fast index.
+
+When flags bit 0 is set, the index is validated. Classification validates UTF-8
+strictly and then validates non-blank lines as JSON. After validation, the same
+first-byte rule distinguishes objects from non-objects. Status 0 in a validated
+index means a validated JSON object. Statuses 2 and 3 appear only in validated
+indexes. All flag bits other than bit 0 must be zero.
 
 ## Source modification time
 
@@ -70,6 +82,7 @@ FILETIME converted from 100-nanosecond intervals since 1601 by subtracting
 A reader must treat the index as absent if the stored source size or source
 modification time differs from the current source file. It must also treat the
 index as absent if its length is not exactly
-`32 + 13 * record_count`, if record offsets are not monotonic or lie outside the
+`40 + 13 * record_count`, if record offsets are not monotonic or lie outside the
 source size, if record byte ranges extend outside the source size, or if any
-status is outside the range 0 through 4.
+status is outside the range 0 through 4. Unknown flag bits or a nonzero reserved
+field also make the index invalid.

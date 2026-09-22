@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <exception>
 #include <fstream>
 #include <limits>
@@ -94,7 +95,28 @@ bool is_valid_utf8(const std::uint8_t* begin, const std::uint8_t* end) {
     return true;
 }
 
-LineStatus classify_line(
+LineStatus classify_line_fast(
+    const std::uint8_t* begin,
+    const std::uint8_t* end,
+    bool first_line) {
+    const bool has_bom = end - begin >= 3 && begin[0] == 0xEFU &&
+                         begin[1] == 0xBBU && begin[2] == 0xBFU;
+    if (first_line && has_bom) {
+        begin += 3;
+    }
+
+    if (std::all_of(begin, end, is_ascii_whitespace)) {
+        return LineStatus::blank;
+    }
+
+    const auto first = std::find_if(
+        begin, end, [](std::uint8_t byte) { return !is_json_whitespace(byte); });
+    return first != end && *first == static_cast<std::uint8_t>('{')
+               ? LineStatus::ok_object
+               : LineStatus::not_object;
+}
+
+LineStatus classify_line_validated(
     const std::uint8_t* begin,
     const std::uint8_t* end,
     bool first_line) {
@@ -238,7 +260,8 @@ std::string path_for_error(const std::filesystem::path& path) {
 
 std::optional<IndexResult> build_index_impl(
     const std::filesystem::path& source,
-    std::string& error) {
+    std::string& error,
+    bool validate) {
     std::error_code filesystem_error;
     if (!std::filesystem::is_regular_file(source, filesystem_error)) {
         error = "input is not a readable regular file: " + path_for_error(source);
@@ -286,18 +309,19 @@ std::optional<IndexResult> build_index_impl(
     IndexResult result;
     result.header.source_size = static_cast<std::uint64_t>(file_size);
     result.header.source_mtime_ns = modification_time;
+    result.header.flags = validate ? kFlagValidated : 0U;
 
     std::size_t line_start = 0U;
     while (line_start < bytes.size()) {
-        const auto newline = std::find(
-            bytes.begin() + static_cast<std::ptrdiff_t>(line_start),
-            bytes.end(),
-            static_cast<std::uint8_t>('\n'));
-        const std::size_t line_end = newline == bytes.end()
-                                         ? bytes.size()
-                                         : static_cast<std::size_t>(
-                                               newline - bytes.begin()) +
-                                               1U;
+        const void* newline_raw = std::memchr(
+            bytes.data() + line_start,
+            static_cast<int>('\n'),
+            bytes.size() - line_start);
+        const auto* newline = static_cast<const std::uint8_t*>(newline_raw);
+        const std::size_t line_end =
+            newline == nullptr
+                ? bytes.size()
+                : static_cast<std::size_t>(newline - bytes.data()) + 1U;
         const std::uint64_t line_length =
             static_cast<std::uint64_t>(line_end - line_start);
         if (line_length > std::numeric_limits<std::uint32_t>::max()) {
@@ -308,8 +332,11 @@ std::optional<IndexResult> build_index_impl(
 
         const std::uint8_t* begin = bytes.data() + line_start;
         const std::uint8_t* end = bytes.data() + line_end;
-        const LineStatus status =
-            classify_line(begin, end, result.records.empty());
+        const LineStatus status = validate
+                                      ? classify_line_validated(
+                                            begin, end, result.records.empty())
+                                      : classify_line_fast(
+                                            begin, end, result.records.empty());
         result.records.push_back(Record{
             static_cast<std::uint64_t>(line_start),
             static_cast<std::uint32_t>(line_length),
@@ -332,6 +359,10 @@ bool write_index_impl(
         error = "index record count does not match its records";
         return false;
     }
+    if ((index.header.flags & ~kKnownFlags) != 0U) {
+        error = "index contains unknown header flags";
+        return false;
+    }
 
     std::ofstream stream(out, std::ios::binary | std::ios::trunc);
     if (!stream.is_open()) {
@@ -345,6 +376,8 @@ bool write_index_impl(
     write_u64(stream, index.header.source_size);
     write_i64(stream, index.header.source_mtime_ns);
     write_u64(stream, index.header.record_count);
+    write_u32(stream, index.header.flags);
+    write_u32(stream, 0U);
 
     for (const Record& record : index.records) {
         write_u64(stream, record.byte_offset);
@@ -384,12 +417,15 @@ std::optional<IndexResult> read_index_impl(
 
     std::array<char, 4> magic{};
     IndexResult result;
+    std::uint32_t reserved = 0U;
     if (!read_exact(stream, magic.data(), magic.size()) ||
         !read_u16(stream, result.header.format_version) ||
         !read_u16(stream, result.header.header_size) ||
         !read_u64(stream, result.header.source_size) ||
         !read_i64(stream, result.header.source_mtime_ns) ||
-        !read_u64(stream, result.header.record_count)) {
+        !read_u64(stream, result.header.record_count) ||
+        !read_u32(stream, result.header.flags) ||
+        !read_u32(stream, reserved)) {
         error = "index has a truncated header: " + path_for_error(in);
         return std::nullopt;
     }
@@ -397,6 +433,11 @@ std::optional<IndexResult> read_index_impl(
     if (magic != kMagic || result.header.format_version != kFormatVersion ||
         result.header.header_size != kHeaderSize) {
         error = "index has an unsupported header: " + path_for_error(in);
+        return std::nullopt;
+    }
+    if ((result.header.flags & ~kKnownFlags) != 0U || reserved != 0U) {
+        error = "index has unsupported flags or reserved fields: " +
+                path_for_error(in);
         return std::nullopt;
     }
 
@@ -523,10 +564,11 @@ bool source_mtime_ns(const std::filesystem::path& p, std::int64_t& out) {
 
 std::optional<IndexResult> build_index(
     const std::filesystem::path& source,
-    std::string& error) {
+    std::string& error,
+    bool validate) {
     error.clear();
     try {
-        return build_index_impl(source, error);
+        return build_index_impl(source, error, validate);
     } catch (const std::exception& exception) {
         error = "cannot index input: " + std::string(exception.what());
     } catch (...) {
