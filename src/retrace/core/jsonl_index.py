@@ -19,12 +19,14 @@ STATUS_INVALID_UTF8 = 2
 STATUS_INVALID_JSON = 3
 STATUS_NOT_OBJECT = 4
 
-HEADER_STRUCT = struct.Struct("<4sHHQqQ")
+FLAG_VALIDATED = 1
+
+HEADER_STRUCT = struct.Struct("<4sHHQqQII")
 RECORD_STRUCT = struct.Struct("<QIB")
 
 _MAGIC = b"RIDX"
-_FORMAT_VERSION = 1
-_HEADER_SIZE = 32
+_FORMAT_VERSION = 2
+_HEADER_SIZE = 40
 _VALID_STATUSES = {
     STATUS_OK,
     STATUS_BLANK,
@@ -68,6 +70,7 @@ class JsonlIndex:
     source_size: int
     source_mtime_ns: int
     entries: tuple[IndexEntry, ...]
+    validated: bool
     _ok_entries: tuple[IndexEntry, ...] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -110,12 +113,12 @@ class JsonlIndex:
 
 
 def _parse_entries(
-    data: bytes, record_count: int, source_size: int
+    data: bytes, record_count: int, source_size: int, header_size: int
 ) -> tuple[IndexEntry, ...] | None:
     entries: list[IndexEntry] = []
     expected_offset = 0
     for index in range(record_count):
-        position = _HEADER_SIZE + index * RECORD_STRUCT.size
+        position = header_size + index * RECORD_STRUCT.size
         byte_offset, byte_length, status = RECORD_STRUCT.unpack_from(data, position)
         if byte_length == 0 or status not in _VALID_STATUSES:
             return None
@@ -134,19 +137,34 @@ def load_index(source: Path) -> JsonlIndex | None:
         data = index_path(source).read_bytes()
         if len(data) < HEADER_STRUCT.size:
             return None
-        magic, version, header_size, source_size, source_mtime_ns, record_count = (
-            HEADER_STRUCT.unpack_from(data)
-        )
+        (
+            magic,
+            version,
+            header_size,
+            source_size,
+            source_mtime_ns,
+            record_count,
+            flags,
+            reserved,
+        ) = HEADER_STRUCT.unpack_from(data)
         if magic != _MAGIC or version != _FORMAT_VERSION or header_size != _HEADER_SIZE:
             return None
-        if len(data) != _HEADER_SIZE + RECORD_STRUCT.size * record_count:
+        if reserved != 0 or flags & ~FLAG_VALIDATED:
+            return None
+        if len(data) != header_size + RECORD_STRUCT.size * record_count:
             return None
         source_stat = source.stat()
         if source_size != source_stat.st_size or source_mtime_ns != source_stat.st_mtime_ns:
             return None
-        entries = _parse_entries(data, record_count, source_size)
+        entries = _parse_entries(data, record_count, source_size, header_size)
         if entries is None:
             return None
-        return JsonlIndex(source, source_size, source_mtime_ns, entries)
+        return JsonlIndex(
+            source,
+            source_size,
+            source_mtime_ns,
+            entries,
+            validated=bool(flags & FLAG_VALIDATED),
+        )
     except (OSError, OverflowError, struct.error, ValueError):
         return None
