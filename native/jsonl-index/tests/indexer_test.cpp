@@ -172,6 +172,29 @@ TEST(JsonlIndexerTest, InvalidJsonHasDedicatedStatus) {
     EXPECT_EQ(result.records[0].status, status(index::LineStatus::invalid_json));
 }
 
+TEST(JsonlIndexerTest, FirstByteDecidesObjectStatusAfterAccept) {
+    TemporaryDirectory directory;
+    const auto source = directory.path() / "first-byte.jsonl";
+    write_text(source, "  {\"a\":1}\n\t[1]\n\"{\"\n{\n  \r\n{}\r\n");
+
+    const auto result = require_build(source);
+
+    const std::array<std::uint8_t, 6> expected{{
+        status(index::LineStatus::ok_object),
+        status(index::LineStatus::not_object),
+        status(index::LineStatus::not_object),
+        status(index::LineStatus::invalid_json),
+        status(index::LineStatus::blank),
+        status(index::LineStatus::ok_object),
+    }};
+    ASSERT_EQ(result.records.size(), expected.size());
+    for (std::size_t record_index = 0U;
+         record_index < expected.size();
+         ++record_index) {
+        EXPECT_EQ(result.records[record_index].status, expected[record_index]);
+    }
+}
+
 TEST(JsonlIndexerTest, JsonNonObjectsHaveDedicatedStatus) {
     TemporaryDirectory directory;
     const auto source = directory.path() / "values.jsonl";

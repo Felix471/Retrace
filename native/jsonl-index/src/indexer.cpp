@@ -37,6 +37,13 @@ bool is_ascii_whitespace(std::uint8_t byte) {
            byte == static_cast<std::uint8_t>('\v');
 }
 
+bool is_json_whitespace(std::uint8_t byte) {
+    return byte == static_cast<std::uint8_t>(' ') ||
+           byte == static_cast<std::uint8_t>('\t') ||
+           byte == static_cast<std::uint8_t>('\n') ||
+           byte == static_cast<std::uint8_t>('\r');
+}
+
 bool is_valid_utf8(const std::uint8_t* begin, const std::uint8_t* end) {
     const std::uint8_t* current = begin;
     while (current != end) {
@@ -115,8 +122,11 @@ LineStatus classify_line(
         if (!nlohmann::json::accept(begin, end)) {
             return LineStatus::invalid_json;
         }
-        const nlohmann::json value = nlohmann::json::parse(begin, end);
-        return value.is_object() ? LineStatus::ok_object : LineStatus::not_object;
+        const auto first = std::find_if(
+            begin, end, [](std::uint8_t byte) { return !is_json_whitespace(byte); });
+        return first != end && *first == static_cast<std::uint8_t>('{')
+                   ? LineStatus::ok_object
+                   : LineStatus::not_object;
     } catch (const nlohmann::json::exception&) {
         return LineStatus::invalid_json;
     }
