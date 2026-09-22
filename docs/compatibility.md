@@ -53,19 +53,20 @@ is committed.
 
 | Measurement | AG2 (45.0 MiB) | HyperAgent (42.4 MiB) | MAD (189.6 MiB) | Synthetic (400.0 MiB) |
 | --- | ---: | ---: | ---: | ---: |
-| (a) Python full sequential pass | 0.134 s | 0.102 s | 0.479 s | 1.404 s |
-| (b) Native index build, default | 0.038 s | 0.025 s | 0.157 s | 0.330 s |
-| (b2) Native index build, `--validate` | 0.163 s | 0.139 s | 0.685 s | 1.522 s |
-| (c) Indexed random access, sampled records | 0.021 s | 0.074 s | 0.217 s | 0.009 s |
-| (d) Python fetch of the same records by line number, one pass | 0.124 s | 0.164 s | 0.676 s | 1.427 s |
-| (e) Line-unit ingest without index | 17.415 s | 19.555 s | not run | not run |
-| (e) Line-unit ingest with index | 16.212 s | 20.231 s | not run | not run |
-| Ratio (a)/(b) | 3.54 | 4.01 | 3.06 | 4.25 |
-| Ratio (a)/(b2) | 0.82 | 0.74 | 0.70 | 0.92 |
-| Ratio (d)/(c) | 5.96 | 2.22 | 3.12 | 154.92 |
-| Ratio (e without)/(e with) | 1.07 | 0.97 | not run | not run |
+| (a) Python full sequential pass | 0.106 s | 0.097 s | 0.470 s | 1.418 s |
+| (b) Native index build, default | 0.003 s | 0.003 s | 0.007 s | 0.036 s |
+| (b2) Native index build, `--validate` | 0.133 s | 0.119 s | 0.542 s | 1.257 s |
+| (c) Indexed random access, sampled records | 0.020 s | 0.077 s | 0.214 s | 0.008 s |
+| (d) Python fetch of the same records by line number, one pass | 0.129 s | 0.135 s | 0.634 s | 1.432 s |
+| (e) Line-unit ingest without index | 17.326 s | 19.636 s | not run | not run |
+| (e) Line-unit ingest with index | 16.158 s | 20.388 s | not run | not run |
+| Ratio (a)/(b) | 36.23 | 35.83 | 66.74 | 39.33 |
+| Ratio (a)/(b2) | 0.79 | 0.81 | 0.87 | 1.13 |
+| Ratio (d)/(c) | 6.41 | 1.76 | 2.96 | 187.14 |
+| Ratio (e without)/(e with) | 1.07 | 0.96 | not run | not run |
 
-The validated build is slower than one Python pass on every input. Line-unit
+The default build maps the input and writes the index once. The validated build
+is slower than one Python pass on three of the four inputs. Line-unit
 ingest needs an array-valued event source, which the MAD and synthetic inputs
 do not have, so (e) was not run for them. Reading the index is not the cost in
 line-unit ingest: extraction and SQLite writes dominate (e), and the two ingest
