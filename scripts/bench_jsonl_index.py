@@ -61,6 +61,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--keep-index", action="store_true")
     parser.add_argument("--ingest-config", type=Path, help="line-unit mapping YAML")
+    parser.add_argument("--label", help="label describing the benchmark input")
     return parser
 
 
@@ -81,9 +82,12 @@ def _python_pass(path: Path) -> tuple[int, int]:
     return object_count, bad_line_count
 
 
-def _build_index(indexer: Path, path: Path, sidecar: Path) -> None:
+def _build_index(indexer: Path, path: Path, sidecar: Path, *, validate: bool = False) -> None:
     sidecar.unlink(missing_ok=True)
-    subprocess.run([indexer, str(path)], check=True, capture_output=True)
+    command = [indexer, str(path)]
+    if validate:
+        command.append("--validate")
+    subprocess.run(command, check=True, capture_output=True)
 
 
 def _sample_indices(index: JsonlIndex, samples: int, seed: int) -> list[int]:
@@ -118,11 +122,14 @@ def _print_report(
     bad_line_count: int,
     measurements: Sequence[Measurement],
     ingest_counts: tuple[tuple[int, int], tuple[int, int]] | None,
+    label: str | None,
 ) -> None:
     python_version = platform.python_version()
     print(f"Machine: {platform.platform()} | Python {python_version} | CPU count: {os.cpu_count()}")
     print(f"Date (UTC): {datetime.now(UTC):%Y-%m-%d}")
     print(f"Input: {path}")
+    if label is not None:
+        print(f"Label: {label}")
     print(f"File size: {source_size} bytes ({source_size / (1024 * 1024):.3f} MiB)")
     print(f"Physical line count: {len(index.entries)}")
     print(f"Object record count: {object_count}")
@@ -145,9 +152,10 @@ def _print_report(
     for measurement in measurements:
         print(f"| {measurement.name} | {measurement.median:.3f} |")
     print(f"Ratio (a)/(b): {measurements[0].median / measurements[1].median:.2f}")
-    print(f"Ratio (d)/(c): {measurements[3].median / measurements[2].median:.2f}")
+    print(f"Ratio (a)/(b2): {measurements[0].median / measurements[2].median:.2f}")
+    print(f"Ratio (d)/(c): {measurements[4].median / measurements[3].median:.2f}")
     if ingest_counts is not None:
-        print(f"Ratio (e without)/(e with): {measurements[4].median / measurements[5].median:.2f}")
+        print(f"Ratio (e without)/(e with): {measurements[5].median / measurements[6].median:.2f}")
     print()
     for measurement in measurements:
         print(f"Raw timings - {measurement.name} (s): {_format_timings(measurement.timings)}")
@@ -159,6 +167,7 @@ def _run(args: argparse.Namespace, indexer: Path) -> int:
     initial_stat = path.stat()
     python_timings: list[float] = []
     build_timings: list[float] = []
+    validate_build_timings: list[float] = []
     access_timings: list[float] = []
     fetch_timings: list[float] = []
     object_count = 0
@@ -181,9 +190,20 @@ def _run(args: argparse.Namespace, indexer: Path) -> int:
             if load_index(path) is None:
                 raise RuntimeError("native indexer did not produce a valid current sidecar index")
 
+        for _ in range(args.runs):
+            elapsed, _ = _timed(
+                lambda: _build_index(indexer, path, sidecar, validate=True)
+            )
+            validate_build_timings.append(elapsed)
+            if load_index(path) is None:
+                raise RuntimeError(
+                    "native indexer --validate did not produce a valid current sidecar index"
+                )
+
+        _build_index(indexer, path, sidecar)
         index = load_index(path)
         if index is None:
-            raise RuntimeError("could not load the sidecar index after building it")
+            raise RuntimeError("could not load the default-mode sidecar index after rebuilding it")
         sampled = _sample_indices(index, args.samples, args.seed)
         ok_entries = tuple(entry for entry in index.entries if entry.status == STATUS_OK)
         wanted_lines = {ok_entries[ordinal].line_no for ordinal in sampled}
@@ -214,6 +234,7 @@ def _run(args: argparse.Namespace, indexer: Path) -> int:
         measurements: list[Measurement] = [
             Measurement("Python full pass", tuple(python_timings)),
             Measurement("Indexer build", tuple(build_timings)),
+            Measurement("Indexer build, --validate", tuple(validate_build_timings)),
             Measurement(f"Indexed random access, {len(sampled)} records", tuple(access_timings)),
             Measurement(
                 f"Python fetch, {len(sampled)} records by line number",
@@ -269,6 +290,7 @@ def _run(args: argparse.Namespace, indexer: Path) -> int:
             bad_line_count,
             measurements,
             ingest_counts,
+            args.label,
         )
         return 0
     finally:
