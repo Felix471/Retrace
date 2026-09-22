@@ -97,6 +97,38 @@ Shipped builtins are `builtin:ag2` (one JSON document per run, `unit: json`),
 `builtin:support_pipeline` (one directory per run), and `builtin:avalon`
 (one JSONL line per run).
 
+## Optional native indexer
+
+Large JSONL files are re-read on every line-unit ingest. The optional
+indexer in `native/jsonl-index` (C++17, CMake 3.20+, no runtime
+dependencies) reads a file once and writes a small `.ridx` sidecar
+recording the byte offset, length, and status of every physical line,
+so the Python reader seeks straight to a record instead of re-parsing
+the file. Everything works without it: the reader falls back to the
+plain path when no valid index exists, and a stale or malformed index
+is never trusted.
+
+Build and use:
+
+```shell
+cmake -S native/jsonl-index -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+ctest --test-dir build
+build/retrace-jsonl-index path/to/logs.jsonl            # writes logs.jsonl.ridx
+build/retrace-jsonl-index path/to/logs.jsonl --validate # also checks UTF-8 and JSON
+```
+
+The default build classifies lines by their first byte; `--validate` adds
+strict UTF-8 and JSON checks via nlohmann/json. Measured on a 190 MB
+corpus-derived file, the default build takes 0.007 s against 0.470 s for
+a full Python parse; the validated build is slower than a Python parse.
+The sidecar layout is documented in
+[native/jsonl-index/FORMAT.md](native/jsonl-index/FORMAT.md), the Python
+reader that consumes it is `retrace.core.jsonl_index`, and the full
+measurements are in [docs/compatibility.md](docs/compatibility.md).
+Twenty-five GoogleTest cases and a Python parity test run in CI against
+the freshly built binary.
+
 ## How it was built
 
 Built with heavy AI assistance under a review-gated workflow.
