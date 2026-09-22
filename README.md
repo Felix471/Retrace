@@ -41,6 +41,8 @@ console script with pipx:
 pipx install .
 ```
 
+An optional native indexer (`native/jsonl-index`, C++17, built with CMake) can speed up re-reading large JSONL files; everything works without it.
+
 ## 60-second quickstart
 
 From the repository checkout, validate the included data and start the viewer:
