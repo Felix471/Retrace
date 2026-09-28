@@ -7,6 +7,10 @@ Semantic Versioning.
 
 ## [Unreleased]
 
+### Known issues
+
+- The "Loading..." placeholder stays on the page after the data renders, below the content of the batch, replay, and compare views.
+
 ## [0.1.0] - 2026-09-27
 
 ### Added
