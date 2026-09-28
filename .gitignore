@@ -24,21 +24,5 @@ dist/
 .coverage
 htmlcov/
 
-# IDE settings and pre-project scratch (local-only)
+# IDE settings
 .idea/
-/main.py
-/ANALYSIS_PLAYBOOK.md
-
-# Local cache used while refreshing docs
-.status-cache/
-
-# Local development notes and process documents (not part of the release)
-/CLAUDE.md
-/AUDIT.md
-/TASKS.md
-/ORCHESTRATION_LOG.md
-/CHANGES.md
-/GATE_REPORT.md
-/DESIGN.md
-/STATUS.md
-/docs/first-run-checklist.md
