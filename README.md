@@ -4,6 +4,10 @@ Retrace is a local-first viewer for inspecting, replaying, tagging, and comparin
 structured multi-agent logs. It is an offline inspection tool, not a monitoring
 service, SDK, or cloud platform.
 
+![Walkthrough of the run table, a replay, and a comparison](docs/images/walkthrough.gif)
+
+A short walkthrough: open the run table, replay one run down to a repaired record, then compare two runs.
+
 See the [changelog](CHANGELOG.md) for release notes.
 
 ## Why local
@@ -18,19 +22,17 @@ The promise is enforced by the public test suite: `tests/test_no_outbound_networ
 
 ## What it looks like
 
-**Batch table** - filter, sort, and group runs by outcome or metadata:
+![Batch table](docs/images/batch-table.png)
 
-![Batch table](docs/images/batch_table.png)
+Batch table: every run in one table you can sort, filter, and group.
 
-**Replay** - step through a run turn by turn; warning and repair banners
-flag ingest issues at a glance:
+![Replay of a single run](docs/images/replay.png)
 
-![Replay with repair banner](docs/images/replay_repair.png)
+Replay: one run step by step, with repaired records marked.
 
-**Compare** - side-by-side structural alignment of two runs with a
-divergence gutter:
+![Comparison of two runs](docs/images/compare.png)
 
-![Compare view](docs/images/compare_view.png)
+Compare: two runs side by side, with the first point where they diverge called out.
 
 ## Install
 
