@@ -11,7 +11,7 @@ Semantic Versioning.
 
 - The "Loading..." placeholder stays on the page after the data renders, below the content of the batch, replay, and compare views.
 
-## [0.1.0] - 2026-09-27
+## [0.1.0] - 2026-09-28
 
 ### Added
 
@@ -22,6 +22,7 @@ Semantic Versioning.
   run, and one JSON document per run (`unit: json`).
 - `check`, `view`, and `init` commands to validate a log directory, open the
   viewer, and draft a mapping file.
+- A built-in mapping for AG2 traces, so a folder of AG2 JSON files opens without writing a mapping file.
 - A local cache, so logs that have not changed are not parsed again.
 - A local viewer with a batch table of all runs, a step-by-step replay of one
   run, and a side-by-side comparison of two runs.
