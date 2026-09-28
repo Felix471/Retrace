@@ -4,10 +4,6 @@ Retrace is a local-first viewer for inspecting, replaying, tagging, and comparin
 structured multi-agent logs. It is an offline inspection tool, not a monitoring
 service, SDK, or cloud platform.
 
-![Walkthrough of the run table, a replay, and a comparison](docs/images/walkthrough.gif)
-
-A short walkthrough: open the run table, replay one run down to a repaired record, then compare two runs.
-
 See the [changelog](CHANGELOG.md) for release notes.
 
 ## Why local
@@ -22,28 +18,36 @@ The promise is enforced by the public test suite: `tests/test_no_outbound_networ
 
 ## What it looks like
 
-![Batch table](docs/images/batch-table.png)
-
 Batch table: every run in one table you can sort, filter, and group.
 
-![Replay of a single run](docs/images/replay.png)
-
-Replay: one run step by step, with repaired records marked.
-
-![Comparison of two runs](docs/images/compare.png)
+![Batch table](docs/images/batch-table.png)
 
 Compare: two runs side by side, with the first point where they diverge called out.
 
+![Comparison of two runs](docs/images/compare.png)
+
+Replay: one run step by step, shown on a small bundled fixture that contains repaired records, because the 40-run demo data has none.
+
+![Replay of a single run](docs/images/replay.png)
+
 ## Install
 
-PyPI publication has not happened. From a checkout, install the `retrace-logs`
-console script with pipx:
+Retrace is not on PyPI yet; install it from a checkout:
+
+Prerequisites: Python 3.11 or newer, and pipx.
 
 ```shell
+git clone https://github.com/Felix471/Retrace.git
+cd Retrace
 pipx install .
+retrace-logs view demo/
 ```
 
 An optional native indexer (`native/jsonl-index`, C++17, built with CMake) can speed up re-reading large JSONL files; everything works without it.
+
+![Walkthrough of the run table, a replay, and a comparison](docs/images/walkthrough.gif)
+
+A short walkthrough: open the run table, replay one run down to a repaired record, then compare two runs.
 
 ## 60-second quickstart
 
@@ -57,6 +61,9 @@ retrace-logs view demo/
 The check reports 40 runs, 523 events, and zero warnings. The viewer opens a
 local browser page with those 40 runs and a five-tag failure-mode distribution.
 Use `retrace-logs view demo/ --no-browser` when a browser must not be opened.
+
+From the batch table, click a run's row to open it in replay; the "Back to runs" link returns to the table.
+To compare, tick the "Select" box on exactly two runs in the batch table and click the "Compare" button that appears.
 
 tested against real AG2 and HyperAgent traces from the MAST corpus (config-only); free-text logs are out of scope in v1.
 (HyperAgent traces ingest as content-only events - no agent or turn fields exist in the source.)
