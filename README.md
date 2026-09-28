@@ -26,10 +26,6 @@ Compare: two runs side by side, with the first point where they diverge called o
 
 ![Comparison of two runs](docs/images/compare.png)
 
-Replay: one run step by step, shown on a small bundled fixture that contains repaired records, because the 40-run demo data has none.
-
-![Replay of a single run](docs/images/replay.png)
-
 ## Install
 
 Retrace is not on PyPI yet; install it from a checkout:
@@ -40,6 +36,7 @@ Prerequisites: Python 3.11 or newer, and pipx.
 git clone https://github.com/Felix471/Retrace.git
 cd Retrace
 pipx install .
+# If retrace-logs is not found afterwards, run "pipx ensurepath" and open a new terminal.
 retrace-logs view demo/
 ```
 
@@ -48,6 +45,14 @@ An optional native indexer (`native/jsonl-index`, C++17, built with CMake) can s
 ![Walkthrough of the run table, a replay, and a comparison](docs/images/walkthrough.gif)
 
 A short walkthrough: open the run table, replay one run down to a repaired record, then compare two runs.
+
+### Repaired records
+
+The small bundled fixture contains logging defects that Retrace repairs and flags; the 40-run demo data has none.
+
+Replay: one run step by step, with repaired records marked.
+
+![Replay of a single run](docs/images/replay.png)
 
 ## 60-second quickstart
 
